@@ -35,12 +35,13 @@ export function calcAge(dob) {
 
 export function formatName(p, style = 'full') {
     if (!p) return '';
+    const person = p.patient || p;
     if (style === 'last-first') {
-        const mn = p.middle_name ? ` ${p.middle_name[0]}.` : '';
-        return `${p.last_name}, ${p.first_name}${mn}`;
+        const mn = person.middle_name ? ` ${person.middle_name[0]}.` : '';
+        return `${person.last_name}, ${person.first_name}${mn}`;
     }
-    const mn = p.middle_name ? ` ${p.middle_name}` : '';
-    return `${p.first_name}${mn} ${p.last_name}`;
+    const mn = person.middle_name ? ` ${person.middle_name}` : '';
+    return `${person.first_name}${mn} ${person.last_name}`;
 }
 
 export function getInitials(name) {

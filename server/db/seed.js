@@ -104,7 +104,34 @@ async function seed() {
                 p.referred_by, p.preferred_appointment_time, p.insurance_provider, p.insurance_id,
                 adminId,
             ]);
-            if (res.rows[0]) patientIds.push(res.rows[0].id);
+            if (res.rows[0]) {
+                patientIds.push(res.rows[0].id);
+                await client.query(`
+          INSERT INTO patient_contacts (patient_id, address, zip_code, phone, email, updated_at)
+          VALUES ($1,$2,$3,$4,$5,NOW())
+          ON CONFLICT (patient_id) DO NOTHING
+        `, [res.rows[0].id, p.address, p.zip_code, p.phone, p.email]);
+                await client.query(`
+          INSERT INTO patient_profile_details (
+            patient_id, occupation, marital_status, spouse_name, referred_by, preferred_appointment_time, updated_at
+          ) VALUES ($1,$2,$3,$4,$5,$6,NOW())
+          ON CONFLICT (patient_id) DO NOTHING
+        `, [res.rows[0].id, p.occupation, p.marital_status, p.spouse_name, p.referred_by, p.preferred_appointment_time]);
+                await client.query(`
+          INSERT INTO patient_insurance (patient_id, insurance_provider, insurance_id, updated_at)
+          VALUES ($1,$2,$3,NOW())
+          ON CONFLICT (patient_id) DO NOTHING
+        `, [res.rows[0].id, p.insurance_provider, p.insurance_id]);
+                await client.query(`
+          INSERT INTO medical_history (patient_id, height, weight, updated_by)
+          VALUES ($1,$2,$3,$4)
+          ON CONFLICT (patient_id) DO UPDATE SET
+            height = EXCLUDED.height,
+            weight = EXCLUDED.weight,
+            updated_by = EXCLUDED.updated_by,
+            updated_at = NOW()
+        `, [res.rows[0].id, p.height, p.weight, adminId]);
+            }
         }
         console.log(`✅ ${patientIds.length} patients seeded.`);
 

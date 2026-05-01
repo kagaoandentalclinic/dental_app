@@ -23,6 +23,7 @@ router.get('/', verifyToken, async (req, res) => {
 // PUT /api/patients/:id/medical-history - upsert
 router.put('/', verifyToken, async (req, res) => {
     const {
+        height, weight,
         general_health, physician_name_address, last_physical_exam, taking_medication, medication_details,
         heart_disease, heart_murmur, rheumatic_fever, jaundice, abnormal_blood_pressure,
         asthma_hay_fever, ulcers, sinus_trouble, tuberculosis_lung_disease, cough,
@@ -35,7 +36,7 @@ router.put('/', verifyToken, async (req, res) => {
     try {
         const result = await pool.query(`
       INSERT INTO medical_history (
-        patient_id, general_health, physician_name_address, last_physical_exam, taking_medication, medication_details,
+        patient_id, height, weight, general_health, physician_name_address, last_physical_exam, taking_medication, medication_details,
         heart_disease, heart_murmur, rheumatic_fever, jaundice, abnormal_blood_pressure,
         asthma_hay_fever, ulcers, sinus_trouble, tuberculosis_lung_disease, cough,
         diabetes, hepatitis, epilepsy, arthritis, anemia, stroke, congenital_heart_lesions, glaucoma,
@@ -44,9 +45,11 @@ router.put('/', verifyToken, async (req, res) => {
         excessive_urination_thirst, is_pregnant, updated_at, updated_by
       ) VALUES (
         $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
-        $21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,NOW(),$35
+        $21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,NOW(),$37
       )
       ON CONFLICT (patient_id) DO UPDATE SET
+        height=EXCLUDED.height,
+        weight=EXCLUDED.weight,
         general_health=EXCLUDED.general_health,
         physician_name_address=EXCLUDED.physician_name_address,
         last_physical_exam=EXCLUDED.last_physical_exam,
@@ -69,7 +72,7 @@ router.put('/', verifyToken, async (req, res) => {
         updated_at=NOW(), updated_by=EXCLUDED.updated_by
       RETURNING *
     `, [
-            req.params.id, general_health || null, physician_name_address || null, last_physical_exam || null,
+            req.params.id, height || null, weight || null, general_health || null, physician_name_address || null, last_physical_exam || null,
             taking_medication || false, medication_details || null,
             heart_disease || false, heart_murmur || false, rheumatic_fever || false, jaundice || false,
             abnormal_blood_pressure || false, asthma_hay_fever || false, ulcers || false, sinus_trouble || false,

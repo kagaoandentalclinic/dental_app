@@ -1,250 +1,212 @@
-import { useState, useEffect } from 'react';
-import { Save, MapPin, Phone, User, Calendar, Briefcase, Heart, Shield } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { Save, Shield } from 'lucide-react';
 import client from '../../api/client';
 import { useToast } from '../../components/Toast';
-import { formatDate, toLocalDateInput } from '../../utils/helpers';
 import { printPatientRecord } from '../../utils/print';
+import { createPatientFormState, validatePatientForm } from '../patient-form/utils';
+import { BasicInfoSection, ContactSection, Field, InsuranceSection, Section } from '../patient-form/PatientFormFields';
+import { toLocalDateInput } from '../../utils/helpers';
 
-const Section = ({ title, icon: Icon, children }) => (
-    <div className="space-y-4">
-        <div className="flex items-center gap-2 pb-2 border-b border-border">
-            <Icon className="w-4 h-4 text-primary" />
-            <h3 className="text-sm font-semibold text-primary uppercase tracking-wide">{title}</h3>
-        </div>
-        {children}
-    </div>
-);
-
-const Field = ({ label, children, error }) => (
-    <div>
-        <label className="form-label">{label}</label>
-        {children}
-        {error && <p className="form-error">{error}</p>}
-    </div>
-);
-
-const Input = ({ ...props }) => (
-    <input className="form-input" {...props} />
-);
-
-const Select = ({ children, ...props }) => (
-    <select className="form-select" {...props}>{children}</select>
-);
-
-const Textarea = ({ ...props }) => (
-    <textarea className="form-textarea" rows={3} {...props} />
-);
-
-export default function PatientInfoTab({ patient, onSave }) {
+export default function PatientInfoTab({ detail, patient, onSave }) {
     const toast = useToast();
-    const [saving, setSaving] = useState(false);
-    const [savedAt, setSavedAt] = useState(null);
+    const [form, setForm] = useState(() => createPatientFormState(detail));
     const [errors, setErrors] = useState({});
-
-    const [form, setForm] = useState({
-        last_name: '', first_name: '', middle_name: '', date_of_birth: '',
-        sex: '', height: '', weight: '', occupation: '', marital_status: '',
-        spouse_name: '', address: '', zip_code: '', phone: '', business_address: '',
-        business_phone: '', email: '', referred_by: '', preferred_appointment_time: '',
-        insurance_provider: '', insurance_id: '', notes: '', record_date: '',
-    });
+    const [saving, setSaving] = useState({ core: false, contact: false, preferences: false });
+    const [savedAt, setSavedAt] = useState(null);
+    const [showBusinessFields, setShowBusinessFields] = useState(false);
 
     useEffect(() => {
-        if (patient) {
-            setForm({
-                last_name: patient.last_name || '',
-                first_name: patient.first_name || '',
-                middle_name: patient.middle_name || '',
-                date_of_birth: toLocalDateInput(patient.date_of_birth),
-                sex: patient.sex || '',
-                height: patient.height || '',
-                weight: patient.weight || '',
-                occupation: patient.occupation || '',
-                marital_status: patient.marital_status || '',
-                spouse_name: patient.spouse_name || '',
-                address: patient.address || '',
-                zip_code: patient.zip_code || '',
-                phone: patient.phone || '',
-                business_address: patient.business_address || '',
-                business_phone: patient.business_phone || '',
-                email: patient.email || '',
-                referred_by: patient.referred_by || '',
-                preferred_appointment_time: patient.preferred_appointment_time || '',
-                insurance_provider: patient.insurance_provider || '',
-                insurance_id: patient.insurance_id || '',
-                notes: patient.notes || '',
-                record_date: toLocalDateInput(patient.record_date),
-            });
-        }
-    }, [patient]);
+        const next = createPatientFormState(detail);
+        setForm(next);
+        setShowBusinessFields(Boolean(next.contact.business_address || next.contact.business_phone));
+    }, [detail]);
 
-    const set = (field) => (e) => setForm(f => ({ ...f, [field]: e.target.value }));
+    const setField = (section, field) => (e) => {
+        const value = typeof e === 'boolean'
+            ? e
+            : e?.target?.type === 'checkbox'
+                ? e.target.checked
+                : e?.target?.value ?? e;
 
-    const validate = () => {
-        const errs = {};
-        if (!form.last_name.trim()) errs.last_name = 'Last name is required';
-        if (!form.first_name.trim()) errs.first_name = 'First name is required';
-        if (!form.date_of_birth) errs.date_of_birth = 'Date of birth is required';
-        setErrors(errs);
-        return Object.keys(errs).length === 0;
+        setForm(current => ({
+            ...current,
+            [section]: {
+                ...current[section],
+                [field]: value,
+            },
+        }));
     };
 
-    const handleSubmit = async (e) => {
+    const printForm = useMemo(() => ({
+        ...form.patient,
+        ...form.contact,
+        ...form.profile,
+        insurance_provider: form.insurance.has_insurance ? form.insurance.insurance_provider : '',
+        insurance_id: form.insurance.has_insurance ? form.insurance.insurance_id : '',
+        ...form.medical,
+    }), [form]);
+
+    const saveSuccess = () => {
+        setSavedAt(new Date());
+        onSave?.();
+    };
+
+    const handleSaveCore = async (e) => {
         e.preventDefault();
-        if (!validate()) return;
-        setSaving(true);
+        const nextErrors = validatePatientForm(form);
+        setErrors(nextErrors);
+        if (Object.keys(nextErrors).length > 0) return;
+
+        setSaving(current => ({ ...current, core: true }));
         try {
-            await client.put(`/patients/${patient.id}`, form);
-            toast.success('Patient record saved successfully!');
-            setSavedAt(new Date());
-            onSave?.();
+            await client.put(`/patients/${patient.id}/core`, { patient: form.patient });
+            toast.success('Basic info saved');
+            saveSuccess();
         } catch (err) {
-            toast.error(err.response?.data?.error || 'Failed to save record');
+            toast.error(err.response?.data?.error || 'Failed to save basic info');
         } finally {
-            setSaving(false);
+            setSaving(current => ({ ...current, core: false }));
+        }
+    };
+
+    const handleSaveContact = async (e) => {
+        e.preventDefault();
+        setSaving(current => ({ ...current, contact: true }));
+        try {
+            await client.put(`/patients/${patient.id}/contact`, { contact: form.contact });
+            toast.success('Contact info saved');
+            saveSuccess();
+        } catch (err) {
+            toast.error(err.response?.data?.error || 'Failed to save contact info');
+        } finally {
+            setSaving(current => ({ ...current, contact: false }));
+        }
+    };
+
+    const handleSavePreferences = async (e) => {
+        e.preventDefault();
+        setSaving(current => ({ ...current, preferences: true }));
+        try {
+            await client.put(`/patients/${patient.id}/profile`, { profile: form.profile });
+            await client.put(`/patients/${patient.id}/insurance`, {
+                insurance: {
+                    insurance_provider: form.insurance.has_insurance ? form.insurance.insurance_provider : '',
+                    insurance_id: form.insurance.has_insurance ? form.insurance.insurance_id : '',
+                    has_insurance: form.insurance.has_insurance,
+                },
+            });
+            toast.success('Insurance and preferences saved');
+            saveSuccess();
+        } catch (err) {
+            toast.error(err.response?.data?.error || 'Failed to save insurance and preferences');
+        } finally {
+            setSaving(current => ({ ...current, preferences: false }));
         }
     };
 
     const timeSince = (d) => {
-        if (!d) return '';
+        if (!d) return 'Unsaved changes';
         const mins = Math.floor((Date.now() - d) / 60000);
-        if (mins < 1) return 'just now';
-        if (mins === 1) return '1 minute ago';
-        return `${mins} minutes ago`;
+        if (mins < 1) return 'Saved just now';
+        if (mins === 1) return 'Saved 1 minute ago';
+        return `Saved ${mins} minutes ago`;
     };
 
     return (
-        <form onSubmit={handleSubmit} className="space-y-6">
-            {/* Print header */}
-            <div className="card text-center py-4">
-                <h2 className="font-display text-xl font-bold text-text-primary">PATIENT HEALTH RECORD</h2>
-                <p className="text-text-secondary text-sm mt-1">Plaza Maestro Annex, Burgos St., Vigan City, Ilocos Sur · Tel. 722-2420</p>
-                <div className="flex items-center justify-center gap-2 mt-3">
-                    <label className="form-label mb-0">Record Date:</label>
-                    <Input type="date" value={form.record_date} onChange={set('record_date')} className="form-input w-auto" />
+        <div className="space-y-6">
+            <div className="card flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                <div>
+                    <h2 className="font-display text-xl font-bold text-text-primary">Patient Overview</h2>
+                    <p className="text-sm text-text-secondary">
+                        Record date: {form.patient.record_date ? toLocalDateInput(form.patient.record_date) : 'Not set'}
+                    </p>
+                </div>
+                <div className="flex flex-col sm:flex-row gap-3">
+                    <button type="button" className="btn-secondary" onClick={() => printPatientRecord(printForm, patient)}>
+                        Print Record
+                    </button>
+                    <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700">
+                        Height and weight are now edited in Medical History.
+                    </div>
                 </div>
             </div>
 
-            {/* Personal Information */}
-            <div className="card space-y-5">
-                <Section title="Personal Information" icon={User}>
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                        <Field label="Last Name *" error={errors.last_name}>
-                            <Input value={form.last_name} onChange={set('last_name')} placeholder="Dela Cruz" />
-                        </Field>
-                        <Field label="First Name *" error={errors.first_name}>
-                            <Input value={form.first_name} onChange={set('first_name')} placeholder="Juan" />
-                        </Field>
-                        <Field label="Middle Name">
-                            <Input value={form.middle_name} onChange={set('middle_name')} placeholder="Reyes" />
-                        </Field>
-                    </div>
+            <form onSubmit={handleSaveCore} className="space-y-4">
+                <BasicInfoSection form={form} setField={setField} errors={errors} showRecordDate showClinicalNote />
+                <div className="flex justify-end">
+                    <button type="submit" className="btn-primary" disabled={saving.core}>
+                        {saving.core ? 'Saving...' : <><Save className="w-4 h-4" /> Save Basic Info</>}
+                    </button>
+                </div>
+            </form>
 
+            <form onSubmit={handleSaveContact} className="space-y-4">
+                <ContactSection
+                    form={form}
+                    setField={setField}
+                    showBusinessFields={showBusinessFields}
+                    setShowBusinessFields={setShowBusinessFields}
+                />
+                <div className="flex justify-end">
+                    <button type="submit" className="btn-primary" disabled={saving.contact}>
+                        {saving.contact ? 'Saving...' : <><Save className="w-4 h-4" /> Save Contact</>}
+                    </button>
+                </div>
+            </form>
+
+            <form onSubmit={handleSavePreferences} className="space-y-4">
+                <Section title="Insurance & Preferences" icon={Shield}>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <Field label="Date of Birth *" error={errors.date_of_birth}>
-                            <Input type="date" value={form.date_of_birth} onChange={set('date_of_birth')} />
+                        <Field label="Occupation">
+                            <input className="form-input" value={form.profile.occupation} onChange={setField('profile', 'occupation')} placeholder="Engineer" />
                         </Field>
-                        <Field label="Sex">
-                            <Select value={form.sex} onChange={set('sex')}>
-                                <option value="">Select sex</option>
-                                <option value="male">Male</option>
-                                <option value="female">Female</option>
-                                <option value="other">Other</option>
-                            </Select>
+                        <Field label="Referred By">
+                            <input className="form-input" value={form.profile.referred_by} onChange={setField('profile', 'referred_by')} placeholder="Dr. Santos / Walk-in" />
                         </Field>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-                        <Field label="Height"><Input value={form.height} onChange={set('height')} placeholder="170 cm" /></Field>
-                        <Field label="Weight"><Input value={form.weight} onChange={set('weight')} placeholder="65 kg" /></Field>
-                        <div className="sm:col-span-2">
-                            <Field label="Occupation">
-                                <Input value={form.occupation} onChange={set('occupation')} placeholder="Engineer" />
-                            </Field>
-                        </div>
                     </div>
 
                     <div>
                         <label className="form-label">Marital Status</label>
-                        <div className="flex flex-wrap gap-3 mt-1">
-                            {['single', 'married', 'widowed', 'divorced'].map(ms => (
-                                <label key={ms} className="flex items-center gap-2 cursor-pointer">
+                        <div className="flex flex-wrap gap-4 mt-1">
+                            {['single', 'married', 'widowed', 'divorced'].map(option => (
+                                <label key={option} className="flex items-center gap-2 cursor-pointer">
                                     <input
                                         type="radio"
                                         name="marital_status"
-                                        value={ms}
-                                        checked={form.marital_status === ms}
-                                        onChange={set('marital_status')}
+                                        value={option}
+                                        checked={form.profile.marital_status === option}
+                                        onChange={setField('profile', 'marital_status')}
                                         className="text-primary focus:ring-primary/30"
                                     />
-                                    <span className="text-sm capitalize text-text-primary">{ms}</span>
+                                    <span className="text-sm capitalize text-text-primary">{option}</span>
                                 </label>
                             ))}
                         </div>
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <Field label="Spouse Name"><Input value={form.spouse_name} onChange={set('spouse_name')} placeholder="Maria Dela Cruz" /></Field>
-                        <Field label="Referred By"><Input value={form.referred_by} onChange={set('referred_by')} placeholder="Dr. Santos" /></Field>
-                    </div>
+                    {form.profile.marital_status === 'married' && (
+                        <Field label="Spouse Name">
+                            <input className="form-input" value={form.profile.spouse_name} onChange={setField('profile', 'spouse_name')} placeholder="Maria Dela Cruz" />
+                        </Field>
+                    )}
 
                     <Field label="Preferred Appointment Time">
-                        <Input value={form.preferred_appointment_time} onChange={set('preferred_appointment_time')} placeholder="Morning, 9-11 AM" />
+                        <input className="form-input" value={form.profile.preferred_appointment_time} onChange={setField('profile', 'preferred_appointment_time')} placeholder="Morning, 9-11 AM" />
                     </Field>
-                </Section>
-            </div>
 
-            {/* Contact Information */}
-            <div className="card space-y-5">
-                <Section title="Contact Information" icon={MapPin}>
-                    <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-                        <div className="sm:col-span-3">
-                            <Field label="Home Address"><Textarea value={form.address} onChange={set('address')} rows={2} placeholder="123 Burgos St., Vigan City" /></Field>
-                        </div>
-                        <Field label="ZIP Code"><Input value={form.zip_code} onChange={set('zip_code')} placeholder="2700" /></Field>
-                    </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                        <Field label="Phone"><Input value={form.phone} onChange={set('phone')} placeholder="09171234567" /></Field>
-                        <Field label="Email"><Input type="email" value={form.email} onChange={set('email')} placeholder="patient@email.com" /></Field>
-                        <Field label="Business Phone"><Input value={form.business_phone} onChange={set('business_phone')} placeholder="09987654321" /></Field>
-                    </div>
-                    <Field label="Business Address"><Textarea value={form.business_address} onChange={set('business_address')} rows={2} placeholder="Business address" /></Field>
-                </Section>
-            </div>
-
-            {/* Insurance */}
-            <div className="card space-y-5">
-                <Section title="Insurance Information" icon={Shield}>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <Field label="Insurance Provider"><Input value={form.insurance_provider} onChange={set('insurance_provider')} placeholder="PhilHealth" /></Field>
-                        <Field label="Insurance ID"><Input value={form.insurance_id} onChange={set('insurance_id')} placeholder="PH-12345678" /></Field>
-                    </div>
-                </Section>
-            </div>
-
-            {/* Notes */}
-            <div className="card">
-                <Section title="Additional Notes" icon={Briefcase}>
                     <Field label="Notes">
-                        <Textarea value={form.notes} onChange={set('notes')} rows={4} placeholder="Any additional notes about this patient..." />
+                        <textarea className="form-textarea" rows={3} value={form.profile.notes} onChange={setField('profile', 'notes')} placeholder="Additional patient notes..." />
                     </Field>
-                </Section>
-            </div>
 
-            {/* Footer */}
-            <div className="flex items-center justify-between flex-wrap gap-3">
-                <p className="text-xs text-text-secondary">
-                    {savedAt ? `Last saved ${timeSince(savedAt)}` : 'Unsaved changes'}
-                </p>
-                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto">
-                    <button type="button" className="btn-secondary w-full sm:w-auto" onClick={() => printPatientRecord(form, patient)}>
-                        Print Record
-                    </button>
-                    <button type="submit" className="btn-primary w-full sm:w-auto" disabled={saving}>
-                        {saving ? 'Saving...' : <><Save className="w-4 h-4" /> Save Record</>}
+                    <InsuranceSection form={form} setField={setField} embedded />
+                </Section>
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                    <p className="text-xs text-text-secondary">{timeSince(savedAt)}</p>
+                    <button type="submit" className="btn-primary" disabled={saving.preferences}>
+                        {saving.preferences ? 'Saving...' : <><Save className="w-4 h-4" /> Save Insurance & Preferences</>}
                     </button>
                 </div>
-            </div>
-        </form>
+            </form>
+        </div>
     );
 }

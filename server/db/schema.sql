@@ -54,12 +54,52 @@ CREATE TABLE IF NOT EXISTS patients (
 ALTER TABLE patients ADD COLUMN IF NOT EXISTS profile_photo TEXT;
 
 -- ============================================
+-- PATIENT CONTACTS
+-- ============================================
+CREATE TABLE IF NOT EXISTS patient_contacts (
+  patient_id UUID PRIMARY KEY REFERENCES patients(id) ON DELETE CASCADE,
+  address TEXT,
+  zip_code VARCHAR(10),
+  phone VARCHAR(20),
+  email VARCHAR(255),
+  business_address TEXT,
+  business_phone VARCHAR(20),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ============================================
+-- PATIENT PROFILE DETAILS
+-- ============================================
+CREATE TABLE IF NOT EXISTS patient_profile_details (
+  patient_id UUID PRIMARY KEY REFERENCES patients(id) ON DELETE CASCADE,
+  occupation VARCHAR(100),
+  marital_status VARCHAR(20) CHECK (marital_status IN ('single', 'married', 'widowed', 'divorced')),
+  spouse_name VARCHAR(100),
+  referred_by VARCHAR(100),
+  preferred_appointment_time VARCHAR(100),
+  notes TEXT,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ============================================
+-- PATIENT INSURANCE
+-- ============================================
+CREATE TABLE IF NOT EXISTS patient_insurance (
+  patient_id UUID PRIMARY KEY REFERENCES patients(id) ON DELETE CASCADE,
+  insurance_provider VARCHAR(100),
+  insurance_id VARCHAR(50),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ============================================
 -- MEDICAL HISTORY
 -- ============================================
 CREATE TABLE IF NOT EXISTS medical_history (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   patient_id UUID UNIQUE REFERENCES patients(id) ON DELETE CASCADE,
-  general_health VARCHAR(20) CHECK (general_health IN ('good', 'fair', 'poor', 'unknown')),
+  general_health VARCHAR(20) CHECK (general_health IN ('excellent', 'good', 'fair', 'poor', 'unknown')),
+  height VARCHAR(20),
+  weight VARCHAR(20),
   physician_name_address TEXT,
   last_physical_exam TEXT,
   taking_medication BOOLEAN DEFAULT false,
@@ -95,6 +135,20 @@ CREATE TABLE IF NOT EXISTS medical_history (
   updated_at TIMESTAMPTZ DEFAULT NOW(),
   updated_by UUID REFERENCES admins(id)
 );
+
+DO $$
+BEGIN
+    ALTER TABLE medical_history DROP CONSTRAINT IF EXISTS medical_history_general_health_check;
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
+ALTER TABLE medical_history ADD COLUMN IF NOT EXISTS height VARCHAR(20);
+ALTER TABLE medical_history ADD COLUMN IF NOT EXISTS weight VARCHAR(20);
+DO $$
+BEGIN
+    ALTER TABLE medical_history ADD CONSTRAINT medical_history_general_health_check
+      CHECK (general_health IN ('excellent', 'good', 'fair', 'poor', 'unknown'));
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
 -- ============================================
 -- DENTAL CHART
@@ -244,6 +298,8 @@ CREATE TABLE IF NOT EXISTS appointments (
 -- INDEXES
 -- ============================================
 CREATE INDEX IF NOT EXISTS idx_patients_name ON patients(last_name, first_name);
+CREATE INDEX IF NOT EXISTS idx_patient_contacts_phone ON patient_contacts(phone);
+CREATE INDEX IF NOT EXISTS idx_patient_contacts_email ON patient_contacts(email);
 CREATE INDEX IF NOT EXISTS idx_dental_chart_patient ON dental_chart(patient_id);
 CREATE INDEX IF NOT EXISTS idx_visits_patient ON visits(patient_id);
 CREATE INDEX IF NOT EXISTS idx_visits_date ON visits(visit_date);
@@ -289,3 +345,49 @@ CREATE INDEX IF NOT EXISTS idx_intake_submissions_patient ON intake_submissions(
 -- CLINIC KIOSK
 -- ============================================
 ALTER TABLE clinic_settings ADD COLUMN IF NOT EXISTS kiosk_token VARCHAR(64);
+
+-- ============================================
+-- BACKFILL HYBRID PATIENT SECTIONS
+-- ============================================
+INSERT INTO patient_contacts (patient_id, address, zip_code, phone, email, business_address, business_phone, updated_at)
+SELECT id, address, zip_code, phone, email, business_address, business_phone, updated_at
+FROM patients
+ON CONFLICT (patient_id) DO UPDATE SET
+  address = EXCLUDED.address,
+  zip_code = EXCLUDED.zip_code,
+  phone = EXCLUDED.phone,
+  email = EXCLUDED.email,
+  business_address = EXCLUDED.business_address,
+  business_phone = EXCLUDED.business_phone,
+  updated_at = EXCLUDED.updated_at;
+
+INSERT INTO patient_profile_details (
+  patient_id, occupation, marital_status, spouse_name, referred_by, preferred_appointment_time, notes, updated_at
+)
+SELECT id, occupation, marital_status, spouse_name, referred_by, preferred_appointment_time, notes, updated_at
+FROM patients
+ON CONFLICT (patient_id) DO UPDATE SET
+  occupation = EXCLUDED.occupation,
+  marital_status = EXCLUDED.marital_status,
+  spouse_name = EXCLUDED.spouse_name,
+  referred_by = EXCLUDED.referred_by,
+  preferred_appointment_time = EXCLUDED.preferred_appointment_time,
+  notes = EXCLUDED.notes,
+  updated_at = EXCLUDED.updated_at;
+
+INSERT INTO patient_insurance (patient_id, insurance_provider, insurance_id, updated_at)
+SELECT id, insurance_provider, insurance_id, updated_at
+FROM patients
+ON CONFLICT (patient_id) DO UPDATE SET
+  insurance_provider = EXCLUDED.insurance_provider,
+  insurance_id = EXCLUDED.insurance_id,
+  updated_at = EXCLUDED.updated_at;
+
+INSERT INTO medical_history (patient_id, height, weight, updated_at)
+SELECT id, height, weight, updated_at
+FROM patients
+WHERE height IS NOT NULL OR weight IS NOT NULL
+ON CONFLICT (patient_id) DO UPDATE SET
+  height = COALESCE(EXCLUDED.height, medical_history.height),
+  weight = COALESCE(EXCLUDED.weight, medical_history.weight),
+  updated_at = NOW();

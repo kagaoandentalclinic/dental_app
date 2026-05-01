@@ -4,6 +4,41 @@ const router = express.Router();
 const pool = require('../db/pool');
 const { verifyToken } = require('../middleware/auth');
 const { publicFormLimiter, checkHoneypot, checkTiming, checkDuplicateCooldown, checkDeviceId } = require('../middleware/antiSpam');
+const {
+    normalizePatientPayload,
+    validateRequiredPatientFields,
+    findExistingPatientId,
+    createPatientWithSections,
+    updatePatientSections,
+    updateCoreSection,
+    updateContactSection,
+    updateProfileSection,
+    updateInsuranceSection,
+    getPatientDetail,
+} = require('../utils/patientSections');
+
+const validatePatientPayload = body().custom((_, { req }) => {
+    const sections = normalizePatientPayload(req.body);
+    const missing = validateRequiredPatientFields(sections);
+    if (missing.length > 0) {
+        throw new Error(`${missing.join(', ')} required`);
+    }
+    return true;
+});
+
+async function respondWithPatientDetail(res, patientId, statusCode = 200) {
+    const detail = await getPatientDetail(pool, patientId);
+    if (!detail) {
+        return res.status(404).json({ error: 'Patient not found' });
+    }
+    return res.status(statusCode).json(detail);
+}
+
+function handleValidationErrors(req, res) {
+    const errors = validationResult(req);
+    if (errors.isEmpty()) return null;
+    return res.status(400).json({ errors: errors.array() });
+}
 
 // GET /api/patients - paginated + search
 router.get('/', verifyToken, async (req, res) => {
@@ -16,52 +51,74 @@ router.get('/', verifyToken, async (req, res) => {
             order = 'asc',
         } = req.query;
 
-        const allowedSorts = ['last_name', 'first_name', 'date_of_birth', 'created_at', 'phone'];
-        const sortCol = allowedSorts.includes(sort) ? sort : 'last_name';
+        const sortMap = {
+            last_name: 'p.last_name',
+            first_name: 'p.first_name',
+            date_of_birth: 'p.date_of_birth',
+            created_at: 'p.created_at',
+            phone: `CASE WHEN pc.patient_id IS NOT NULL THEN pc.phone ELSE p.phone END`,
+        };
+        const sortCol = sortMap[sort] || sortMap.last_name;
         const sortOrder = order === 'desc' ? 'DESC' : 'ASC';
-        const offset = (parseInt(page) - 1) * parseInt(limit);
+        const offset = (parseInt(page, 10) - 1) * parseInt(limit, 10);
         const searchQuery = `%${search}%`;
 
-        const countRes = await pool.query(`
-      SELECT COUNT(*) FROM patients
-      WHERE is_active = true
-        AND (
-          last_name ILIKE $1 OR first_name ILIKE $1
-          OR CONCAT(last_name, ' ', first_name) ILIKE $1
-          OR CONCAT(first_name, ' ', last_name) ILIKE $1
-          OR phone ILIKE $1 OR email ILIKE $1
-        )
-    `, [searchQuery]);
+        const countRes = await pool.query(
+            `SELECT COUNT(*) FROM patients p
+             LEFT JOIN patient_contacts pc ON pc.patient_id = p.id
+             WHERE p.is_active = true
+               AND (
+                 p.last_name ILIKE $1 OR p.first_name ILIKE $1
+                 OR CONCAT(p.last_name, ' ', p.first_name) ILIKE $1
+                 OR CONCAT(p.first_name, ' ', p.last_name) ILIKE $1
+                 OR (CASE WHEN pc.patient_id IS NOT NULL THEN pc.phone ELSE p.phone END) ILIKE $1
+                 OR (CASE WHEN pc.patient_id IS NOT NULL THEN pc.email ELSE p.email END) ILIKE $1
+               )`,
+            [searchQuery]
+        );
 
-        const patientsRes = await pool.query(`
-      SELECT
-        p.id, p.last_name, p.first_name, p.middle_name, p.date_of_birth, p.sex,
-        p.phone, p.email, p.address, p.record_date, p.created_at, p.profile_photo,
-        (
-          SELECT COUNT(*) FROM dental_chart dc
-          WHERE dc.patient_id = p.id AND dc.status != 'healthy'
-        ) AS dental_issues,
-        (
-          SELECT MAX(v.visit_date) FROM visits v WHERE v.patient_id = p.id
-        ) AS last_visit
-      FROM patients p
-      WHERE p.is_active = true
-        AND (
-          p.last_name ILIKE $1 OR p.first_name ILIKE $1
-          OR CONCAT(p.last_name, ' ', p.first_name) ILIKE $1
-          OR CONCAT(p.first_name, ' ', p.last_name) ILIKE $1
-          OR p.phone ILIKE $1 OR p.email ILIKE $1
-        )
-      ORDER BY p.${sortCol} ${sortOrder}
-      LIMIT $2 OFFSET $3
-    `, [searchQuery, parseInt(limit), offset]);
+        const patientsRes = await pool.query(
+            `SELECT
+                p.id,
+                p.last_name,
+                p.first_name,
+                p.middle_name,
+                p.date_of_birth,
+                p.sex,
+                CASE WHEN pc.patient_id IS NOT NULL THEN pc.phone ELSE p.phone END AS phone,
+                CASE WHEN pc.patient_id IS NOT NULL THEN pc.email ELSE p.email END AS email,
+                CASE WHEN pc.patient_id IS NOT NULL THEN pc.address ELSE p.address END AS address,
+                p.record_date,
+                p.created_at,
+                p.profile_photo,
+                (
+                  SELECT COUNT(*) FROM dental_chart dc
+                  WHERE dc.patient_id = p.id AND dc.status != 'healthy'
+                ) AS dental_issues,
+                (
+                  SELECT MAX(v.visit_date) FROM visits v WHERE v.patient_id = p.id
+                ) AS last_visit
+             FROM patients p
+             LEFT JOIN patient_contacts pc ON pc.patient_id = p.id
+             WHERE p.is_active = true
+               AND (
+                 p.last_name ILIKE $1 OR p.first_name ILIKE $1
+                 OR CONCAT(p.last_name, ' ', p.first_name) ILIKE $1
+                 OR CONCAT(p.first_name, ' ', p.last_name) ILIKE $1
+                 OR (CASE WHEN pc.patient_id IS NOT NULL THEN pc.phone ELSE p.phone END) ILIKE $1
+                 OR (CASE WHEN pc.patient_id IS NOT NULL THEN pc.email ELSE p.email END) ILIKE $1
+               )
+             ORDER BY ${sortCol} ${sortOrder}
+             LIMIT $2 OFFSET $3`,
+            [searchQuery, parseInt(limit, 10), offset]
+        );
 
         res.json({
             patients: patientsRes.rows,
-            total: parseInt(countRes.rows[0].count),
-            page: parseInt(page),
-            limit: parseInt(limit),
-            totalPages: Math.ceil(parseInt(countRes.rows[0].count) / parseInt(limit)),
+            total: parseInt(countRes.rows[0].count, 10),
+            page: parseInt(page, 10),
+            limit: parseInt(limit, 10),
+            totalPages: Math.ceil(parseInt(countRes.rows[0].count, 10) / parseInt(limit, 10)),
         });
     } catch (err) {
         console.error(err);
@@ -69,107 +126,38 @@ router.get('/', verifyToken, async (req, res) => {
     }
 });
 
-// GET /api/patients/:id - single patient
+// GET /api/patients/:id - single patient detail
 router.get('/:id', verifyToken, async (req, res) => {
     try {
-        const { id } = req.params;
-        const result = await pool.query(
-            `SELECT p.*,
-        a.full_name AS created_by_name,
-        (SELECT COUNT(*) FROM dental_chart dc WHERE dc.patient_id = p.id AND dc.status != 'healthy') AS dental_issues,
-        (SELECT COUNT(*) FROM visits v WHERE v.patient_id = p.id) AS total_visits,
-        (SELECT MAX(v.visit_date) FROM visits v WHERE v.patient_id = p.id) AS last_visit
-       FROM patients p
-       LEFT JOIN admins a ON p.created_by = a.id
-       WHERE p.id = $1 AND p.is_active = true`,
-            [id]
-        );
-        if (result.rows.length === 0) return res.status(404).json({ error: 'Patient not found' });
-        res.json(result.rows[0]);
+        const detail = await getPatientDetail(pool, req.params.id);
+        if (!detail) return res.status(404).json({ error: 'Patient not found' });
+        res.json(detail);
     } catch (err) {
+        console.error(err);
         res.status(500).json({ error: 'Server error' });
     }
 });
 
 // POST /api/patients/intake - public, no auth required
 router.post('/intake', publicFormLimiter, checkHoneypot, checkTiming, checkDeviceId, checkDuplicateCooldown, [
-    body('last_name').trim().notEmpty().withMessage('Last name is required'),
-    body('first_name').trim().notEmpty().withMessage('First name is required'),
-    body('date_of_birth').isDate().withMessage('Valid date of birth is required'),
+    validatePatientPayload,
 ], async (req, res) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+    if (handleValidationErrors(req, res)) return;
 
-    const {
-        last_name, first_name, middle_name, date_of_birth, sex, height, weight,
-        occupation, marital_status, spouse_name, address, zip_code, phone,
-        business_address, business_phone, email, referred_by, preferred_appointment_time,
-        insurance_provider, insurance_id, notes, record_date, profile_photo,
-    } = req.body;
+    const sections = normalizePatientPayload(req.body);
 
     try {
-        // Check for existing patient with same name + birthday
-        const dupCheck = await pool.query(
-            `SELECT id FROM patients
-             WHERE LOWER(TRIM(last_name)) = LOWER(TRIM($1))
-               AND LOWER(TRIM(first_name)) = LOWER(TRIM($2))
-               AND date_of_birth = $3
-               AND is_active = true
-             LIMIT 1`,
-            [last_name, first_name, date_of_birth]
-        );
-
-        if (dupCheck.rows.length > 0) {
-            // Patient already exists — update their contact/personal info instead
-            const patientId = dupCheck.rows[0].id;
-            await pool.query(`
-                UPDATE patients SET
-                  phone                      = COALESCE($1::text,  phone),
-                  email                      = COALESCE($2::text,  email),
-                  address                    = COALESCE($3::text,  address),
-                  zip_code                   = COALESCE($4::text,  zip_code),
-                  business_phone             = COALESCE($5::text,  business_phone),
-                  business_address           = COALESCE($6::text,  business_address),
-                  insurance_provider         = COALESCE($7::text,  insurance_provider),
-                  insurance_id               = COALESCE($8::text,  insurance_id),
-                  preferred_appointment_time = COALESCE($9::text,  preferred_appointment_time),
-                  height                     = COALESCE($10::text, height),
-                  weight                     = COALESCE($11::text, weight),
-                  occupation                 = COALESCE($12::text, occupation),
-                  profile_photo              = COALESCE($13::text, profile_photo),
-                  updated_at                 = NOW()
-                WHERE id = $14
-            `, [
-                phone || null, email || null, address || null, zip_code || null,
-                business_phone || null, business_address || null,
-                insurance_provider || null, insurance_id || null,
-                preferred_appointment_time || null, height || null, weight || null,
-                occupation || null,
-                (profile_photo && profile_photo.startsWith('data:image/')) ? profile_photo : null,
-                patientId,
-            ]);
+        const existingPatientId = await findExistingPatientId(pool, sections.patient);
+        if (existingPatientId) {
+            const updated = await updatePatientSections(pool, existingPatientId, sections, null);
+            if (!updated) return res.status(404).json({ error: 'Patient not found' });
             res.locals.recordSpamKey?.();
-            return res.json({ updated: true, patientName: first_name });
+            return res.json({ updated: true, patientName: sections.patient.first_name });
         }
 
-        const result = await pool.query(`
-      INSERT INTO patients (
-        last_name, first_name, middle_name, date_of_birth, sex, height, weight,
-        occupation, marital_status, spouse_name, address, zip_code, phone,
-        business_address, business_phone, email, referred_by, preferred_appointment_time,
-        insurance_provider, insurance_id, notes, record_date, profile_photo, created_by
-      ) VALUES (
-        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,NULL
-      ) RETURNING *
-    `, [
-            last_name, first_name, middle_name || null, date_of_birth, sex || null, height || null, weight || null,
-            occupation || null, marital_status || null, spouse_name || null, address || null, zip_code || null, phone || null,
-            business_address || null, business_phone || null, email || null, referred_by || null, preferred_appointment_time || null,
-            insurance_provider || null, insurance_id || null, notes || null, record_date || null,
-            (profile_photo && profile_photo.startsWith('data:image/')) ? profile_photo : null,
-        ]);
+        await createPatientWithSections(pool, sections, null);
         res.locals.recordSpamKey?.();
-        res.status(201).json({ updated: false, patientName: first_name, patient: result.rows[0] });
+        res.status(201).json({ updated: false, patientName: sections.patient.first_name });
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'Server error' });
@@ -178,87 +166,104 @@ router.post('/intake', publicFormLimiter, checkHoneypot, checkTiming, checkDevic
 
 // POST /api/patients - create
 router.post('/', verifyToken, [
-    body('last_name').trim().notEmpty().withMessage('Last name is required'),
-    body('first_name').trim().notEmpty().withMessage('First name is required'),
-    body('date_of_birth').isDate().withMessage('Valid date of birth is required'),
+    validatePatientPayload,
 ], async (req, res) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+    if (handleValidationErrors(req, res)) return;
 
-    const {
-        last_name, first_name, middle_name, date_of_birth, sex, height, weight,
-        occupation, marital_status, spouse_name, address, zip_code, phone,
-        business_address, business_phone, email, referred_by, preferred_appointment_time,
-        insurance_provider, insurance_id, notes, record_date,
-    } = req.body;
+    const sections = normalizePatientPayload(req.body);
 
     try {
-        const dupCheck = await pool.query(
-            `SELECT id, first_name, last_name, date_of_birth FROM patients
-             WHERE LOWER(TRIM(last_name)) = LOWER(TRIM($1))
-               AND LOWER(TRIM(first_name)) = LOWER(TRIM($2))
-               AND date_of_birth = $3
-               AND is_active = true
-             LIMIT 1`,
-            [last_name, first_name, date_of_birth]
-        );
-        if (dupCheck.rows.length > 0) {
+        const existingPatientId = await findExistingPatientId(pool, sections.patient);
+        if (existingPatientId) {
+            const existing = await pool.query(
+                `SELECT id, first_name, last_name, date_of_birth
+                 FROM patients
+                 WHERE id = $1`,
+                [existingPatientId]
+            );
             return res.status(409).json({
                 error: 'A patient with this name and date of birth already exists in the system.',
-                existingPatient: dupCheck.rows[0],
+                existingPatient: existing.rows[0],
             });
         }
 
-        const result = await pool.query(`
-      INSERT INTO patients (
-        last_name, first_name, middle_name, date_of_birth, sex, height, weight,
-        occupation, marital_status, spouse_name, address, zip_code, phone,
-        business_address, business_phone, email, referred_by, preferred_appointment_time,
-        insurance_provider, insurance_id, notes, record_date, created_by
-      ) VALUES (
-        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23
-      ) RETURNING *
-    `, [
-            last_name, first_name, middle_name || null, date_of_birth, sex || null, height || null, weight || null,
-            occupation || null, marital_status || null, spouse_name || null, address || null, zip_code || null, phone || null,
-            business_address || null, business_phone || null, email || null, referred_by || null, preferred_appointment_time || null,
-            insurance_provider || null, insurance_id || null, notes || null, record_date || null, req.admin.id,
-        ]);
-        res.status(201).json(result.rows[0]);
+        const inserted = await createPatientWithSections(pool, sections, req.admin.id);
+        await respondWithPatientDetail(res, inserted.id, 201);
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'Server error' });
     }
 });
 
-// PUT /api/patients/:id - update
-router.put('/:id', verifyToken, async (req, res) => {
-    const {
-        last_name, first_name, middle_name, date_of_birth, sex, height, weight,
-        occupation, marital_status, spouse_name, address, zip_code, phone,
-        business_address, business_phone, email, referred_by, preferred_appointment_time,
-        insurance_provider, insurance_id, notes, record_date,
-    } = req.body;
+// PUT /api/patients/:id - update full patient detail (compatibility endpoint)
+router.put('/:id', verifyToken, [
+    validatePatientPayload,
+], async (req, res) => {
+    if (handleValidationErrors(req, res)) return;
+
+    const sections = normalizePatientPayload(req.body);
 
     try {
-        const result = await pool.query(`
-      UPDATE patients SET
-        last_name=$1, first_name=$2, middle_name=$3, date_of_birth=$4, sex=$5,
-        height=$6, weight=$7, occupation=$8, marital_status=$9, spouse_name=$10,
-        address=$11, zip_code=$12, phone=$13, business_address=$14, business_phone=$15,
-        email=$16, referred_by=$17, preferred_appointment_time=$18, insurance_provider=$19,
-        insurance_id=$20, notes=$21, record_date=$22, updated_at=NOW()
-      WHERE id=$23 AND is_active=true
-      RETURNING *
-    `, [
-            last_name, first_name, middle_name || null, date_of_birth, sex || null,
-            height || null, weight || null, occupation || null, marital_status || null, spouse_name || null,
-            address || null, zip_code || null, phone || null, business_address || null, business_phone || null,
-            email || null, referred_by || null, preferred_appointment_time || null, insurance_provider || null,
-            insurance_id || null, notes || null, record_date || null, req.params.id,
-        ]);
-        if (result.rows.length === 0) return res.status(404).json({ error: 'Patient not found' });
-        res.json(result.rows[0]);
+        const updated = await updatePatientSections(pool, req.params.id, sections, req.admin.id);
+        if (!updated) return res.status(404).json({ error: 'Patient not found' });
+        await respondWithPatientDetail(res, req.params.id);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+// PUT /api/patients/:id/core - targeted core patient update
+router.put('/:id/core', verifyToken, [
+    validatePatientPayload,
+], async (req, res) => {
+    if (handleValidationErrors(req, res)) return;
+
+    const sections = normalizePatientPayload(req.body);
+
+    try {
+        const updated = await updateCoreSection(pool, req.params.id, sections.patient);
+        if (!updated) return res.status(404).json({ error: 'Patient not found' });
+        await respondWithPatientDetail(res, req.params.id);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+// PUT /api/patients/:id/contact - targeted contact update
+router.put('/:id/contact', verifyToken, async (req, res) => {
+    try {
+        const sections = normalizePatientPayload(req.body);
+        const updated = await updateContactSection(pool, req.params.id, sections.contact);
+        if (!updated) return res.status(404).json({ error: 'Patient not found' });
+        await respondWithPatientDetail(res, req.params.id);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+// PUT /api/patients/:id/profile - targeted profile update
+router.put('/:id/profile', verifyToken, async (req, res) => {
+    try {
+        const sections = normalizePatientPayload(req.body);
+        const updated = await updateProfileSection(pool, req.params.id, sections.profile);
+        if (!updated) return res.status(404).json({ error: 'Patient not found' });
+        await respondWithPatientDetail(res, req.params.id);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+// PUT /api/patients/:id/insurance - targeted insurance update
+router.put('/:id/insurance', verifyToken, async (req, res) => {
+    try {
+        const sections = normalizePatientPayload(req.body);
+        const updated = await updateInsuranceSection(pool, req.params.id, sections.insurance);
+        if (!updated) return res.status(404).json({ error: 'Patient not found' });
+        await respondWithPatientDetail(res, req.params.id);
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'Server error' });
@@ -275,6 +280,7 @@ router.delete('/:id', verifyToken, async (req, res) => {
         if (result.rows.length === 0) return res.status(404).json({ error: 'Patient not found' });
         res.json({ message: 'Patient deleted successfully' });
     } catch (err) {
+        console.error(err);
         res.status(500).json({ error: 'Server error' });
     }
 });

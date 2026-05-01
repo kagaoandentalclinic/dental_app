@@ -32,6 +32,7 @@ export default function MedicalHistoryTab({ patient }) {
     const [lastUpdated, setLastUpdated] = useState(null);
 
     const defaultForm = {
+        height: '', weight: '',
         general_health: '', physician_name_address: '', last_physical_exam: '',
         taking_medication: false, medication_details: '',
         heart_disease: false, heart_murmur: false, rheumatic_fever: false, jaundice: false,
@@ -81,6 +82,29 @@ export default function MedicalHistoryTab({ patient }) {
 
     return (
         <form onSubmit={handleSubmit} className="space-y-5">
+            <Section title="Clinical Snapshot" icon={Pill}>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                        <label className="form-label">Height</label>
+                        <input
+                            className="form-input"
+                            placeholder="170 cm"
+                            value={form.height || ''}
+                            onChange={setInput('height')}
+                        />
+                    </div>
+                    <div>
+                        <label className="form-label">Weight</label>
+                        <input
+                            className="form-input"
+                            placeholder="65 kg"
+                            value={form.weight || ''}
+                            onChange={setInput('weight')}
+                        />
+                    </div>
+                </div>
+            </Section>
+
             {/* General Health */}
             <Section title="General Health" icon={Activity}>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

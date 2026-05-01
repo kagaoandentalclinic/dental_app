@@ -13,6 +13,7 @@ import VisitsTab from '../features/visits/VisitsTab';
 import MedicalHistoryTab from '../features/medical/MedicalHistoryTab';
 import OrthodonticsTab from '../features/orthodontics/OrthodonticsTab';
 import PhotosTab from '../features/photos/PhotosTab';
+import { flattenPatientDetail } from '../features/patient-form/utils';
 
 const TABS = [
     { id: 'info', label: 'Patient Info', icon: ClipboardList },
@@ -30,7 +31,7 @@ export default function PatientDetail() {
     const navigate = useNavigate();
     const toast = useToast();
 
-    const [patient, setPatient] = useState(null);
+    const [detail, setDetail] = useState(null);
     const [loading, setLoading] = useState(true);
     const [deleteOpen, setDeleteOpen] = useState(false);
     const [photoZoom, setPhotoZoom] = useState(false);
@@ -41,7 +42,7 @@ export default function PatientDetail() {
     const fetchPatient = useCallback(async () => {
         try {
             const res = await client.get(`/patients/${id}`);
-            setPatient(res.data);
+            setDetail(res.data);
         } catch (err) {
             toast.error('Failed to load patient');
             navigate('/patients');
@@ -71,7 +72,8 @@ export default function PatientDetail() {
         );
     }
 
-    if (!patient) return null;
+    if (!detail) return null;
+    const patient = flattenPatientDetail(detail);
 
     return (
         <div className="space-y-5 animate-fade-up">
@@ -181,7 +183,7 @@ export default function PatientDetail() {
                     exit={{ opacity: 0, y: -8 }}
                     transition={{ duration: 0.2 }}
                 >
-                    {activeTab === 'info' && <PatientInfoTab patient={patient} onSave={fetchPatient} />}
+                    {activeTab === 'info' && <PatientInfoTab detail={detail} patient={patient} onSave={fetchPatient} />}
                     {activeTab === 'dental' && <DentalChartTab patient={patient} />}
                     {activeTab === 'visits' && <VisitsTab patient={patient} />}
                     {activeTab === 'medical' && <MedicalHistoryTab patient={patient} />}

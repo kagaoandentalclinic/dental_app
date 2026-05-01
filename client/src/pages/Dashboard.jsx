@@ -17,14 +17,14 @@ const REVENUE_PERIODS = [
     { value: 'month', label: 'Month', statLabel: 'Monthly Revenue' },
 ];
 
-function StatCard({ icon: Icon, label, value, color, index }) {
+function StatCard({ icon: Icon, label, value, color, accent, index }) {
     return (
-        <motion.div {...fadeUp(index)} className="card flex items-center gap-4">
-            <div className={`w-14 h-14 rounded-xl flex items-center justify-center shrink-0 ${color}`}>
-                <Icon className="w-7 h-7" />
+        <motion.div {...fadeUp(index)} className={`card flex items-center gap-4 border-t-[3px] ${accent}`}>
+            <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 ${color}`}>
+                <Icon className="w-6 h-6" />
             </div>
             <div>
-                <p className="text-text-secondary text-sm font-medium">{label}</p>
+                <p className="text-text-secondary text-xs font-medium uppercase tracking-wide">{label}</p>
                 <p className="text-2xl font-bold text-text-primary mt-0.5">{value ?? '—'}</p>
             </div>
         </motion.div>
@@ -33,14 +33,14 @@ function StatCard({ icon: Icon, label, value, color, index }) {
 
 function RevenueStatCard({ label, value, revenuePeriod, onPeriodChange }) {
     return (
-        <motion.div {...fadeUp(3)} className="card">
+        <motion.div {...fadeUp(3)} className="card border-t-[3px] border-t-green-500">
             <div className="flex items-start gap-4">
-                <div className="w-14 h-14 rounded-xl flex items-center justify-center shrink-0 bg-green-50 text-green-700">
-                    <Banknote className="w-7 h-7" />
+                <div className="w-12 h-12 rounded-xl flex items-center justify-center shrink-0 bg-green-50 text-green-700">
+                    <Banknote className="w-6 h-6" />
                 </div>
                 <div className="min-w-0">
-                    <p className="text-text-secondary text-sm font-medium">{label}</p>
-                    <p className="text-2xl font-bold text-text-primary mt-0.5">{value ?? 'â€”'}</p>
+                    <p className="text-text-secondary text-xs font-medium uppercase tracking-wide">{label}</p>
+                    <p className="text-2xl font-bold text-text-primary mt-0.5">{value ?? '—'}</p>
                 </div>
             </div>
             <div className="mt-3 grid grid-cols-3 rounded-lg border border-border overflow-hidden text-xs font-medium">
@@ -99,16 +99,16 @@ export default function Dashboard() {
 
     return (
         <div className="space-y-6 animate-fade-up">
-            <div>
+            <div className="border-l-[3px] border-primary pl-3">
                 <h1 className="font-display text-2xl font-bold text-text-primary">Dashboard</h1>
                 <p className="text-text-secondary text-sm">Overview of today's clinic activity</p>
             </div>
 
             {/* Stat cards */}
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-                <StatCard index={0} icon={Users} label="Total Patients" value={stats?.totalPatients} color="bg-teal-50 text-teal-600" />
-                <StatCard index={1} icon={Calendar} label="Today's Appointments" value={stats?.appointmentsToday} color="bg-blue-50 text-blue-600" />
-                <StatCard index={2} icon={Clock} label="Upcoming Appointments" value={stats?.upcomingAppointments} color="bg-amber-50 text-amber-600" />
+                <StatCard index={0} icon={Users} label="Total Patients" value={stats?.totalPatients} color="bg-teal-50 text-teal-600" accent="border-t-teal-500" />
+                <StatCard index={1} icon={Calendar} label="Today's Appointments" value={stats?.appointmentsToday} color="bg-blue-50 text-blue-600" accent="border-t-blue-500" />
+                <StatCard index={2} icon={Clock} label="Upcoming Appointments" value={stats?.upcomingAppointments} color="bg-amber-50 text-amber-600" accent="border-t-amber-500" />
                 <RevenueStatCard
                     label={revenueMeta.statLabel}
                     value={stats ? formatCurrency(stats.monthlyRevenue) : null}
@@ -139,7 +139,18 @@ export default function Dashboard() {
                                 ) : stats?.recentPatients?.length ? (
                                     stats.recentPatients.map(p => (
                                         <tr key={p.id} className="border-b border-border/50 hover:bg-bg/60 transition-colors">
-                                            <td className="px-4 py-3 font-medium text-text-primary">{formatName(p, 'last-first')}</td>
+                                            <td className="px-4 py-3">
+                                                <div className="flex items-center gap-3">
+                                                    {p.profile_photo ? (
+                                                        <img src={p.profile_photo} alt="" className="w-8 h-8 rounded-full object-cover shrink-0 border border-border" />
+                                                    ) : (
+                                                        <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-xs shrink-0">
+                                                            {p.first_name?.[0]}{p.last_name?.[0]}
+                                                        </div>
+                                                    )}
+                                                    <span className="font-medium text-text-primary">{formatName(p, 'last-first')}</span>
+                                                </div>
+                                            </td>
                                             <td className="px-4 py-3 text-text-secondary">{calcAge(p.date_of_birth)} yrs</td>
                                             <td className="px-4 py-3 text-text-secondary">{p.last_visit ? formatDate(p.last_visit) : 'No visits'}</td>
                                             <td className="px-4 py-3">

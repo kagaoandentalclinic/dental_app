@@ -537,7 +537,7 @@ export default function Appointments() {
         <div className="space-y-4 animate-fade-up">
             {/* Header */}
             <div className="flex items-center justify-between flex-wrap gap-3">
-                <div>
+                <div className="border-l-[3px] border-primary pl-3">
                     <h1 className="font-display text-2xl font-bold text-text-primary">Appointments</h1>
                     <p className="text-text-secondary text-sm">Weekly schedule — Mon to Sat</p>
                 </div>

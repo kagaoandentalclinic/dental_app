@@ -72,7 +72,7 @@ export default function PatientList() {
         <div className="space-y-5 animate-fade-up">
             {/* Header */}
             <div className="flex items-center justify-between gap-4 flex-wrap">
-                <div>
+                <div className="border-l-[3px] border-primary pl-3">
                     <h1 className="font-display text-2xl font-bold text-text-primary">Patients</h1>
                     <p className="text-text-secondary text-sm">{data.total} total records</p>
                 </div>

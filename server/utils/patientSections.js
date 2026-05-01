@@ -1,4 +1,4 @@
-const schema = require('../../shared/patient-form-schema.json');
+const schema = require('./patient-form-schema.json');
 
 const SECTION_FIELDS = schema.sections;
 

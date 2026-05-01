@@ -1,0 +1,48 @@
+{
+  "requiredFields": ["last_name", "first_name", "date_of_birth"],
+  "options": {
+    "sex": ["male", "female", "other"],
+    "maritalStatus": ["single", "married", "widowed", "divorced"]
+  },
+  "sections": {
+    "patient": [
+      "record_date",
+      "last_name",
+      "first_name",
+      "middle_name",
+      "date_of_birth",
+      "sex",
+      "profile_photo"
+    ],
+    "contact": [
+      "address",
+      "zip_code",
+      "phone",
+      "email",
+      "business_address",
+      "business_phone"
+    ],
+    "profile": [
+      "occupation",
+      "marital_status",
+      "spouse_name",
+      "referred_by",
+      "preferred_appointment_time",
+      "notes"
+    ],
+    "insurance": [
+      "insurance_provider",
+      "insurance_id"
+    ],
+    "medical": [
+      "height",
+      "weight"
+    ]
+  },
+  "steps": [
+    "basic",
+    "contact",
+    "preferences",
+    "review"
+  ]
+}

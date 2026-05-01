@@ -12,6 +12,7 @@ import Modal from '../components/Modal';
 import ConfirmDialog from '../components/ConfirmDialog';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { VISIT_TYPES, APPOINTMENT_STATUSES, APPOINTMENT_STATUS_STYLES } from '../utils/constants';
+import { flattenPatientDetail } from '../features/patient-form/utils';
 
 // ── Calendar constants ────────────────────────────────────
 const START_HOUR = 8;
@@ -463,7 +464,7 @@ export default function Appointments() {
         client.get(`/patients/${prefillPatientId}`)
             .then((res) => {
                 if (cancelled) return;
-                setModal({ mode: 'create', data: { patient: res.data } });
+                setModal({ mode: 'create', data: { patient: flattenPatientDetail(res.data) } });
             })
             .catch(() => {
                 if (!cancelled) toast.error('Failed to load patient for appointment');
@@ -602,7 +603,7 @@ export default function Appointments() {
                                     <div className="relative border-r border-border/50">
                                         {HOURS.map(h => (
                                             <div key={h} className="absolute w-full flex items-start justify-end pr-1.5"
-                                                style={{ top: (h - START_HOUR) * HOUR_HEIGHT - 8, height: HOUR_HEIGHT }}>
+                                                style={{ top: Math.max(0, (h - START_HOUR) * HOUR_HEIGHT - 8), height: HOUR_HEIGHT }}>
                                                 <span className="text-[10px] text-text-secondary font-medium">
                                                     {h === 12 ? '12pm' : h > 12 ? `${h - 12}pm` : `${h}am`}
                                                 </span>

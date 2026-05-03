@@ -75,15 +75,35 @@ router.get('/stats', verifyToken, async (req, res) => {
         ORDER BY p.created_at DESC LIMIT 5
       `),
             pool.query(`
+        WITH outstanding AS (
+          SELECT
+            p.id, p.last_name, p.first_name, p.profile_photo,
+            COUNT(v.id) AS visit_count,
+            COALESCE(SUM(v.cost), 0) AS amount,
+            MAX(v.visit_date::date) AS last_activity
+          FROM visits v
+          JOIN patients p ON p.id = v.patient_id AND p.is_active = true
+          WHERE v.payment_status IN ('pending', 'partial')
+          GROUP BY p.id, p.last_name, p.first_name, p.profile_photo
+
+          UNION ALL
+
+          SELECT
+            p.id, p.last_name, p.first_name, p.profile_photo,
+            0 AS visit_count,
+            (oc.total_cost - oc.total_paid) AS amount,
+            oc.updated_at::date AS last_activity
+          FROM orthodontic_cases oc
+          JOIN patients p ON p.id = oc.patient_id AND p.is_active = true
+          WHERE oc.status = 'active' AND oc.total_paid < oc.total_cost
+        )
         SELECT
-          p.id, p.last_name, p.first_name, p.profile_photo,
-          COUNT(v.id) AS pending_visits,
-          COALESCE(SUM(v.cost), 0) AS outstanding_amount,
-          MAX(v.visit_date) AS last_visit
-        FROM visits v
-        JOIN patients p ON p.id = v.patient_id AND p.is_active = true
-        WHERE v.payment_status IN ('pending', 'partial')
-        GROUP BY p.id, p.last_name, p.first_name, p.profile_photo
+          id, last_name, first_name, profile_photo,
+          SUM(visit_count) AS pending_visits,
+          SUM(amount) AS outstanding_amount,
+          MAX(last_activity) AS last_visit
+        FROM outstanding
+        GROUP BY id, last_name, first_name, profile_photo
         ORDER BY outstanding_amount DESC
         LIMIT 8
       `),

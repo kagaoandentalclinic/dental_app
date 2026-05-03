@@ -42,7 +42,7 @@ export function BasicInfoSection({ form, setField, errors = {}, showRecordDate =
             </div>
 
             <div className={`grid grid-cols-1 gap-4 ${showRecordDate ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
-                <Field label="Date of Birth" required error={errors.date_of_birth}>
+                <Field label="Date of Birth" error={errors.date_of_birth}>
                     <input type="date" className="form-input" value={form.patient.date_of_birth} onChange={setField('patient', 'date_of_birth')} />
                 </Field>
                 <Field label="Sex">

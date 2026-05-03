@@ -3,8 +3,9 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
     User, Building2, Users, Eye, EyeOff, Plus, Pencil,
     ToggleLeft, ToggleRight, X, Save, KeyRound, ShieldCheck,
-    ClipboardList, Copy, Check, RefreshCw, Link2, Tablet,
+    ClipboardList, Copy, Check, RefreshCw, Link2, Tablet, Download,
 } from 'lucide-react';
+import { QRCodeSVG } from 'qrcode.react';
 import client from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { formatDate } from '../utils/helpers';
@@ -614,6 +615,42 @@ function FormSettingsCard({
                         Share this link with patients. Keep it private — anyone with the link can submit.
                     </p>
                 </FieldGroup>
+
+                {formUrl && enabled && (
+                    <div className="flex flex-col sm:flex-row items-center gap-5 pt-4 border-t border-border">
+                        <div className="p-3 bg-white border border-border rounded-xl shadow-sm shrink-0">
+                            <QRCodeSVG
+                                className="qr-download-target"
+                                value={formUrl}
+                                size={140}
+                                fgColor="#051f19"
+                                bgColor="#ffffff"
+                            />
+                        </div>
+                        <div className="flex-1 space-y-2">
+                            <p className="text-sm font-medium text-text-primary">QR Code</p>
+                            <p className="text-xs text-text-secondary">
+                                Print or display this QR code at the front desk. Patients scan it with their phone camera to open the registration form on their own device — no URL needed.
+                            </p>
+                            <button
+                                type="button"
+                                className="btn-secondary text-xs gap-1.5"
+                                onClick={() => {
+                                    const svg = document.querySelector('.qr-download-target');
+                                    if (!svg) return;
+                                    const blob = new Blob([svg.outerHTML], { type: 'image/svg+xml' });
+                                    const a = document.createElement('a');
+                                    a.href = URL.createObjectURL(blob);
+                                    a.download = `${formPath}-qr.svg`;
+                                    a.click();
+                                }}
+                            >
+                                <Download className="w-3.5 h-3.5" /> Download QR
+                            </button>
+                        </div>
+                    </div>
+                )}
+
                 <FieldGroup label="URL Slug">
                     <div className="flex flex-col sm:flex-row gap-2">
                         <div className="flex flex-1 items-stretch min-w-0">

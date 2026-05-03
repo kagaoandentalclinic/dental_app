@@ -1,13 +1,14 @@
 'use strict';
 const rateLimit = require('express-rate-limit');
 
-// Rate limiter: 1 submission per IP per 1 hour
+// Rate limiter: 15 submissions per IP per 1 hour (backstop against bots)
+// Per-person limiting is handled by device fingerprint (5/device/hr) + name+DOB cooldown
 const publicFormLimiter = rateLimit({
     windowMs: 60 * 60 * 1000,
-    max: 1,
+    max: 15,
     standardHeaders: true,
     legacyHeaders: false,
-    message: { error: 'Too many submissions. Please wait 1 hour and try again.' },
+    message: { error: 'Too many submissions from this network. Please wait and try again.' },
 });
 
 // ── In-memory stores ──────────────────────────────────────────────────────────

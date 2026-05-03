@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
-import { Plus, Pencil, Trash2, Calendar, User, RefreshCw, Printer, Receipt, FileText } from 'lucide-react';
+import { Plus, Pencil, Trash2, Calendar, User, RefreshCw, Printer, Receipt, FileText, CheckCircle } from 'lucide-react';
 
 import client from '../../api/client';
 import { useToast } from '../../components/Toast';
 import { formatDate, formatCurrency, capitalize, toLocalDateInput } from '../../utils/helpers';
+
 import { VISIT_TYPES, PAYMENT_STATUSES, VISIT_TYPE_COLORS } from '../../utils/constants';
 import Modal from '../../components/Modal';
 import LoadingSpinner from '../../components/LoadingSpinner';
@@ -117,6 +118,37 @@ function VisitForm({ patientId, visit, onSave, onClose }) {
     );
 }
 
+function FinancialSummary({ visits }) {
+    const billed = visits.reduce((s, v) => s + parseFloat(v.cost || 0), 0);
+    const paid = visits
+        .filter(v => v.payment_status === 'paid' || v.payment_status === 'insurance')
+        .reduce((s, v) => s + parseFloat(v.cost || 0), 0);
+    const partial = visits
+        .filter(v => v.payment_status === 'partial')
+        .reduce((s, v) => s + parseFloat(v.cost || 0) * 0.5, 0);
+    const outstanding = billed - paid - partial;
+
+    if (visits.length === 0) return null;
+    return (
+        <div className="grid grid-cols-3 gap-3">
+            <div className="card p-3 sm:p-4 text-center border-t-[3px] border-t-primary">
+                <p className="text-xs text-text-secondary uppercase tracking-wide font-medium">Total Billed</p>
+                <p className="text-lg font-bold text-text-primary mt-0.5">{formatCurrency(billed)}</p>
+            </div>
+            <div className="card p-3 sm:p-4 text-center border-t-[3px] border-t-green-500">
+                <p className="text-xs text-text-secondary uppercase tracking-wide font-medium">Collected</p>
+                <p className="text-lg font-bold text-green-700 mt-0.5">{formatCurrency(paid + partial)}</p>
+            </div>
+            <div className={`card p-3 sm:p-4 text-center border-t-[3px] ${outstanding > 0 ? 'border-t-red-500' : 'border-t-gray-300'}`}>
+                <p className="text-xs text-text-secondary uppercase tracking-wide font-medium">Outstanding</p>
+                <p className={`text-lg font-bold mt-0.5 ${outstanding > 0 ? 'text-red-600' : 'text-text-secondary'}`}>
+                    {formatCurrency(Math.max(0, outstanding))}
+                </p>
+            </div>
+        </div>
+    );
+}
+
 export default function VisitsTab({ patient }) {
     const toast = useToast();
     const [visits, setVisits] = useState([]);
@@ -124,7 +156,8 @@ export default function VisitsTab({ patient }) {
     const [modalOpen, setModalOpen] = useState(false);
     const [editVisit, setEditVisit] = useState(null);
     const [deleteVisit, setDeleteVisit] = useState(null);
-    const [printMenu, setPrintMenu] = useState(null); // visit id with open menu
+    const [printMenu, setPrintMenu] = useState(null);
+    const [markingPaid, setMarkingPaid] = useState(null);
 
     const fetchVisits = useCallback(async () => {
         setLoading(true);
@@ -161,6 +194,19 @@ export default function VisitsTab({ patient }) {
     const openAdd = () => { setEditVisit(null); setModalOpen(true); };
     const openEdit = (v) => { setEditVisit(v); setModalOpen(true); };
     const closeModal = () => { setModalOpen(false); setEditVisit(null); };
+
+    const handleMarkPaid = async (v) => {
+        setMarkingPaid(v.id);
+        try {
+            await client.put(`/patients/${patient.id}/visits/${v.id}`, { ...v, payment_status: 'paid' });
+            toast.success('Marked as paid');
+            fetchVisits();
+        } catch {
+            toast.error('Failed to update payment status');
+        } finally {
+            setMarkingPaid(null);
+        }
+    };
 
     const fetchClinic = async () => {
         try {
@@ -200,6 +246,8 @@ export default function VisitsTab({ patient }) {
                     </button>
                 </div>
             </div>
+
+            {!loading && <FinancialSummary visits={visits} />}
 
             {loading ? (
                 <div className="flex justify-center py-12"><LoadingSpinner size="lg" /></div>
@@ -255,6 +303,17 @@ export default function VisitsTab({ patient }) {
                                         </div>
                                     </div>
                                     <div className="flex items-center justify-end gap-1 shrink-0">
+                                        {/* Quick mark as paid */}
+                                        {(v.payment_status === 'pending' || v.payment_status === 'partial') && (
+                                            <button
+                                                className="btn-icon text-green-600 hover:bg-green-50"
+                                                title="Mark as Paid"
+                                                disabled={markingPaid === v.id}
+                                                onClick={() => handleMarkPaid(v)}
+                                            >
+                                                <CheckCircle className={`w-4 h-4 ${markingPaid === v.id ? 'animate-pulse' : ''}`} />
+                                            </button>
+                                        )}
                                         {/* Print dropdown */}
                                         <div className="relative">
                                             <button

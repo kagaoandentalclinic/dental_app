@@ -17,6 +17,7 @@ router.get('/stats', verifyToken, async (req, res) => {
             upcomingRes,
             monthlyRevenueRes,
             recentPatientsRes,
+            outstandingRes,
         ] = await Promise.all([
             pool.query("SELECT COUNT(*) FROM patients WHERE is_active = true"),
             pool.query("SELECT COUNT(*) FROM appointments WHERE appointment_date >= CURRENT_DATE AND appointment_date < CURRENT_DATE + INTERVAL '1 day' AND status NOT IN ('cancelled', 'completed')"),
@@ -73,6 +74,19 @@ router.get('/stats', verifyToken, async (req, res) => {
         FROM patients p WHERE p.is_active = true
         ORDER BY p.created_at DESC LIMIT 5
       `),
+            pool.query(`
+        SELECT
+          p.id, p.last_name, p.first_name, p.profile_photo,
+          COUNT(v.id) AS pending_visits,
+          COALESCE(SUM(v.cost), 0) AS outstanding_amount,
+          MAX(v.visit_date) AS last_visit
+        FROM visits v
+        JOIN patients p ON p.id = v.patient_id AND p.is_active = true
+        WHERE v.payment_status IN ('pending', 'partial')
+        GROUP BY p.id, p.last_name, p.first_name, p.profile_photo
+        ORDER BY outstanding_amount DESC
+        LIMIT 8
+      `),
         ]);
 
         res.json({
@@ -82,6 +96,7 @@ router.get('/stats', verifyToken, async (req, res) => {
             monthlyRevenue: parseFloat(monthlyRevenueRes.rows[0].total),
             revenuePeriod,
             recentPatients: recentPatientsRes.rows,
+            outstandingPatients: outstandingRes.rows,
         });
     } catch (err) {
         console.error(err);

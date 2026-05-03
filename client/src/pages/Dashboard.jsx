@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Users, Calendar, Clock, Banknote, Eye } from 'lucide-react';
+import { Users, Calendar, Clock, Banknote, Eye, AlertTriangle } from 'lucide-react';
 import client from '../api/client';
 import { formatDate, formatName, calcAge, formatCurrency } from '../utils/helpers';
 
@@ -60,6 +60,35 @@ function RevenueStatCard({ label, value, revenuePeriod, onPeriodChange }) {
                 ))}
             </div>
         </motion.div>
+    );
+}
+
+function OutstandingRow({ p }) {
+    return (
+        <tr className="border-b border-border/50 hover:bg-bg/60 transition-colors">
+            <td className="px-4 py-3">
+                <div className="flex items-center gap-3">
+                    {p.profile_photo ? (
+                        <img src={p.profile_photo} alt="" className="w-8 h-8 rounded-full object-cover shrink-0 border border-border" />
+                    ) : (
+                        <div className="w-8 h-8 rounded-full bg-rose-100 flex items-center justify-center text-rose-600 font-bold text-xs shrink-0">
+                            {p.first_name?.[0]}{p.last_name?.[0]}
+                        </div>
+                    )}
+                    <span className="font-medium text-text-primary">{formatName(p, 'last-first')}</span>
+                </div>
+            </td>
+            <td className="px-4 py-3 text-text-secondary">{parseInt(p.pending_visits)} visit{parseInt(p.pending_visits) !== 1 ? 's' : ''}</td>
+            <td className="px-4 py-3">
+                <span className="font-semibold text-rose-600">{formatCurrency(parseFloat(p.outstanding_amount))}</span>
+            </td>
+            <td className="px-4 py-3 text-text-secondary">{p.last_visit ? formatDate(p.last_visit) : '—'}</td>
+            <td className="px-4 py-3">
+                <Link to={`/patients/${p.id}`} className="btn-ghost text-xs py-1.5 px-3">
+                    <Eye className="w-3.5 h-3.5" /> View
+                </Link>
+            </td>
+        </tr>
     );
 }
 
@@ -168,6 +197,37 @@ export default function Dashboard() {
                                     ))
                                 ) : (
                                     <tr><td colSpan={5} className="px-4 py-8 text-center text-text-secondary">No patients yet</td></tr>
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+                </motion.div>
+
+                {/* Outstanding Balances */}
+                <motion.div {...fadeUp(5)} className="card">
+                    <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center gap-2">
+                            <AlertTriangle className="w-4 h-4 text-rose-500" />
+                            <h2 className="font-semibold text-text-primary">Outstanding Balances</h2>
+                        </div>
+                        <Link to="/patients" className="text-primary text-sm font-medium hover:underline">View all →</Link>
+                    </div>
+                    <div className="overflow-x-auto -mx-2">
+                        <table className="w-full min-w-[600px] text-sm">
+                            <thead>
+                                <tr className="border-b border-border">
+                                    {['Patient', 'Unpaid Visits', 'Amount Owed', 'Last Visit', ''].map(h => (
+                                        <th key={h} className="px-4 py-2.5 text-left text-xs font-semibold text-text-secondary uppercase tracking-wide">{h}</th>
+                                    ))}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {loading ? (
+                                    [1, 2, 3].map(i => <SkeletonRow key={i} />)
+                                ) : stats?.outstandingPatients?.length ? (
+                                    stats.outstandingPatients.map(p => <OutstandingRow key={p.id} p={p} />)
+                                ) : (
+                                    <tr><td colSpan={5} className="px-4 py-8 text-center text-text-secondary">No outstanding balances</td></tr>
                                 )}
                             </tbody>
                         </table>

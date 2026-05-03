@@ -1,5 +1,5 @@
 {
-  "requiredFields": ["last_name", "first_name", "date_of_birth"],
+  "requiredFields": ["last_name", "first_name"],
   "options": {
     "sex": ["male", "female", "other"],
     "maritalStatus": ["single", "married", "widowed", "divorced"]

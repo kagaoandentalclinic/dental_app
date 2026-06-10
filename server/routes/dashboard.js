@@ -56,7 +56,12 @@ router.get('/stats', verifyToken, async (req, res) => {
             END AS period_end
         ),
         visit_revenue AS (
-          SELECT COALESCE(SUM(v.cost), 0) AS total
+          SELECT COALESCE(SUM(
+            CASE
+              WHEN v.payment_status = 'partial' THEN COALESCE(v.cost, 0) * 0.5
+              ELSE COALESCE(v.cost, 0)
+            END
+          ), 0) AS total
           FROM visits v
           JOIN patients p ON p.id = v.patient_id AND p.is_active = true
           , bounds
@@ -98,7 +103,12 @@ router.get('/stats', verifyToken, async (req, res) => {
           SELECT
             p.id, p.last_name, p.first_name, p.profile_photo,
             COUNT(v.id) AS visit_count,
-            COALESCE(SUM(v.cost), 0) AS amount,
+            COALESCE(SUM(
+              CASE
+                WHEN v.payment_status = 'partial' THEN COALESCE(v.cost, 0) * 0.5
+                ELSE COALESCE(v.cost, 0)
+              END
+            ), 0) AS amount,
             MAX(v.visit_date::date) AS last_activity
           FROM visits v
           JOIN patients p ON p.id = v.patient_id AND p.is_active = true

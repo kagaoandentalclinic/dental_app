@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Pencil, Trash2, ArrowLeft, Phone, Mail, Heart, Stethoscope, Calendar, ClipboardList, Smile, Camera, ZoomIn, ZoomOut, X } from 'lucide-react';
+import { Pencil, Trash2, Phone, Mail, Heart, Stethoscope, Calendar, ClipboardList, Smile, Camera, ZoomIn, ZoomOut, X } from 'lucide-react';
 import client from '../api/client';
 import { formatName, calcAge, formatDate, getInitials } from '../utils/helpers';
+import BackButton from '../components/BackButton';
 import { useToast } from '../components/Toast';
 import ConfirmDialog from '../components/ConfirmDialog';
 import LoadingSpinner from '../components/LoadingSpinner';
@@ -78,9 +79,7 @@ export default function PatientDetail() {
     return (
         <div className="space-y-5 animate-fade-up">
             {/* Back */}
-            <Link to="/patients" className="btn-ghost -ml-2 w-fit">
-                <ArrowLeft className="w-4 h-4" /> Back to Patients
-            </Link>
+            <BackButton to="/patients" label="BACK TO PATIENTS" className="w-fit" />
 
             {/* Patient header card */}
             <div className="card">

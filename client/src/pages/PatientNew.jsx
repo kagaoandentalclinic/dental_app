@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { AlertCircle, ArrowLeft, ChevronLeft, ChevronRight, Save } from 'lucide-react';
+import { AlertCircle, ChevronLeft, ChevronRight, Save } from 'lucide-react';
 import client from '../api/client';
+import BackButton from '../components/BackButton';
 import { useToast } from '../components/Toast';
 import { toLocalDateInput } from '../utils/helpers';
 import { BasicInfoSection, ContactSection, InsuranceSection, PreferencesSection, Section } from '../features/patient-form/PatientFormFields';
@@ -106,9 +107,7 @@ export default function PatientNew() {
         <form onSubmit={handleSubmit} className="space-y-5 animate-fade-up">
             <div className="flex items-center justify-between gap-4 flex-wrap">
                 <div className="flex items-center gap-3">
-                    <Link to="/patients" className="btn-ghost -ml-2">
-                        <ArrowLeft className="w-4 h-4" /> Back
-                    </Link>
+                    <BackButton to="/patients" />
                     <div>
                         <h1 className="font-display text-2xl font-bold text-text-primary">New Patient</h1>
                         <p className="text-text-secondary text-sm">Add one section at a time instead of filling one long sheet.</p>

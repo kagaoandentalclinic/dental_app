@@ -8,9 +8,9 @@ import EmptyState from '../components/EmptyState';
 
 function SkeletonRow() {
     return (
-        <tr className="border-b border-border/50">
+        <tr>
             {[1, 2, 3, 4, 5, 6, 7].map(i => (
-                <td key={i} className="px-4 py-3"><div className="skeleton h-4 rounded" style={{ width: `${60 + Math.random() * 40}%` }} /></td>
+                <td key={i} className="px-4 py-3.5"><div className="skeleton h-3.5 rounded w-full" /></td>
             ))}
         </tr>
     );
@@ -72,9 +72,9 @@ export default function PatientList() {
         <div className="space-y-5 animate-fade-up">
             {/* Header */}
             <div className="flex items-center justify-between gap-4 flex-wrap">
-                <div className="border-l-[3px] border-primary pl-3">
-                    <h1 className="font-display text-2xl font-bold text-text-primary">Patients</h1>
-                    <p className="text-text-secondary text-sm">{data.total} total records</p>
+                <div>
+                    <h1 className="text-xl font-bold text-text-primary">Patients</h1>
+                    <p className="text-sm text-slate-400 mt-0.5">{data.total} total records</p>
                 </div>
                 <Link to="/patients/new" className="btn-primary">
                     <UserPlus className="w-4 h-4" /> Add Patient
@@ -96,14 +96,13 @@ export default function PatientList() {
             {/* Table */}
             <div className="card p-0 overflow-hidden">
                 <div className="overflow-x-auto">
-                    <table className="w-full min-w-[860px] text-sm">
-                        <thead className="bg-bg/80 border-b border-border">
+                    <table className="data-table min-w-[860px]">
+                        <thead>
                             <tr>
                                 {cols.map(col => (
                                     <th
                                         key={col.key}
-                                        className={`px-4 py-3 text-left text-xs font-semibold text-text-secondary uppercase tracking-wide whitespace-nowrap
-                      ${col.sortable ? 'cursor-pointer hover:text-primary select-none' : ''}`}
+                                        className={`whitespace-nowrap ${col.sortable ? 'cursor-pointer hover:text-primary select-none' : ''}`}
                                         onClick={() => col.sortable && handleSort(col.key)}
                                     >
                                         <span className="flex items-center gap-1">
@@ -133,17 +132,17 @@ export default function PatientList() {
                                         initial={{ opacity: 0 }}
                                         animate={{ opacity: 1 }}
                                         transition={{ delay: idx * 0.03 }}
-                                        className="border-b border-border/50 hover:bg-bg/40 transition-colors cursor-pointer"
+                                        className="cursor-pointer"
                                         onClick={() => navigate(`/patients/${p.id}`)}
                                     >
-                                        <td className="px-4 py-3.5 text-text-secondary">{start + idx}</td>
-                                        <td className="px-4 py-3.5">
+                                        <td className="text-slate-400 tabular-nums">{start + idx}</td>
+                                        <td>
                                             <div className="flex items-center gap-3">
                                                 {p.profile_photo ? (
                                                     <img
                                                         src={p.profile_photo}
                                                         alt={formatName(p, 'last-first')}
-                                                        className="w-8 h-8 rounded-full object-cover shrink-0 border border-border"
+                                                        className="w-8 h-8 rounded-full object-cover shrink-0 border-2 border-white shadow-sm"
                                                     />
                                                 ) : (
                                                     <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-xs shrink-0">
@@ -153,17 +152,17 @@ export default function PatientList() {
                                                 <span className="font-medium text-text-primary">{formatName(p, 'last-first')}</span>
                                             </div>
                                         </td>
-                                        <td className="px-4 py-3.5 text-text-secondary">{calcAge(p.date_of_birth)} yrs</td>
-                                        <td className="px-4 py-3.5 text-text-secondary capitalize">{p.sex || '—'}</td>
-                                        <td className="px-4 py-3.5 text-text-secondary">{p.phone || '—'}</td>
-                                        <td className="px-4 py-3.5 text-text-secondary">{p.last_visit ? formatDate(p.last_visit) : 'No visits'}</td>
-                                        <td className="px-4 py-3.5">
+                                        <td className="text-slate-500">{calcAge(p.date_of_birth)} yrs</td>
+                                        <td className="text-slate-500 capitalize">{p.sex || '—'}</td>
+                                        <td className="text-slate-500">{p.phone || '—'}</td>
+                                        <td className="text-slate-500">{p.last_visit ? formatDate(p.last_visit) : <span className="text-slate-300 italic">No visits</span>}</td>
+                                        <td>
                                             {parseInt(p.dental_issues) > 0
                                                 ? <span className="badge-red">{p.dental_issues} issue{p.dental_issues !== '1' ? 's' : ''}</span>
                                                 : <span className="badge-green">Healthy</span>
                                             }
                                         </td>
-                                        <td className="px-4 py-3.5">
+                                        <td>
                                             <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
                                                 <Link to={`/patients/${p.id}`} className="btn-icon" title="View">
                                                     <Eye className="w-4 h-4" />
@@ -182,7 +181,7 @@ export default function PatientList() {
 
                 {/* Pagination */}
                 {data.total > 0 && (
-                    <div className="px-4 py-3.5 border-t border-border flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-sm text-text-secondary">
+                    <div className="px-4 py-3.5 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-sm text-slate-400">
                         <span>Showing {start}–{end} of {data.total} patients</span>
                         <div className="flex items-center gap-1">
                             <button

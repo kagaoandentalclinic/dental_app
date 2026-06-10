@@ -13,16 +13,72 @@ import EmptyState from '../../components/EmptyState';
 import ConfirmDialog from '../../components/ConfirmDialog';
 import { printVisitReceipt, printPrescription } from '../../utils/print';
 
+function formatTeethTreated(value) {
+    if (Array.isArray(value)) {
+        return value.map(tooth => `#${tooth}`).join(', ');
+    }
+    return value || '';
+}
+
+function parseTeethTreated(value) {
+    if (!value || !value.trim()) return null;
+    const matches = value.match(/\d+/g) || [];
+    const teeth = matches
+        .map(item => Number.parseInt(item, 10))
+        .filter(item => Number.isInteger(item) && item > 0);
+
+    return teeth.length > 0 ? [...new Set(teeth)] : [];
+}
+
+// Parses stored visit_type string (comma-separated or single) into an array
+function parseVisitTypes(value) {
+    if (!value) return [];
+    return String(value).split(',').map(v => v.trim()).filter(Boolean);
+}
+
+// Multi-select pill picker for visit types
+function VisitTypeMultiPicker({ selected, onChange }) {
+    const toggle = (value) => {
+        if (selected.includes(value)) {
+            onChange(selected.filter(v => v !== value));
+        } else {
+            onChange([...selected, value]);
+        }
+    };
+
+    return (
+        <div className="flex flex-wrap gap-2">
+            {VISIT_TYPES.map(t => {
+                const active = selected.includes(t.value);
+                return (
+                    <button
+                        key={t.value}
+                        type="button"
+                        onClick={() => toggle(t.value)}
+                        className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-all duration-150 ${
+                            active
+                                ? 'bg-primary text-white border-primary shadow-sm'
+                                : 'bg-white text-slate-500 border-slate-200 hover:border-primary hover:text-primary'
+                        }`}
+                    >
+                        {t.label}
+                    </button>
+                );
+            })}
+        </div>
+    );
+}
+
 function VisitForm({ patientId, visit, onSave, onClose }) {
     const toast = useToast();
     const [saving, setSaving] = useState(false);
     const [form, setForm] = useState({
         visit_date: visit?.visit_date ? toLocalDateInput(visit.visit_date) : toLocalDateInput(new Date()),
-        visit_type: visit?.visit_type || 'checkup',
+        visit_types: parseVisitTypes(visit?.visit_type),   // array of selected types
         chief_complaint: visit?.chief_complaint || '',
         diagnosis: visit?.diagnosis || '',
         treatment_performed: visit?.treatment_performed || '',
-        teeth_treated: visit?.teeth_treated || '',
+        teeth_treated: formatTeethTreated(visit?.teeth_treated),
         prescriptions: visit?.prescriptions || '',
         next_appointment: visit?.next_appointment ? toLocalDateInput(visit.next_appointment) : '',
         cost: visit?.cost || '',
@@ -31,17 +87,30 @@ function VisitForm({ patientId, visit, onSave, onClose }) {
     });
 
     const set = (field) => (e) => setForm(f => ({ ...f, [field]: e.target.value }));
+    const setVisitTypes = (types) => setForm(f => ({ ...f, visit_types: types }));
 
     const handleSubmit = async (e) => {
         e.preventDefault();
+        if (form.visit_types.length === 0) { toast.error('Please select at least one visit type'); return; }
         if (!form.treatment_performed.trim()) { toast.error('Treatment performed is required'); return; }
+        const parsedTeeth = parseTeethTreated(form.teeth_treated);
+        if (form.teeth_treated.trim() && (!parsedTeeth || parsedTeeth.length === 0)) {
+            toast.error('Enter tooth numbers like #14, #15');
+            return;
+        }
         setSaving(true);
         try {
+            const payload = {
+                ...form,
+                visit_type: form.visit_types.join(','),  // store as comma-separated string
+                teeth_treated: parsedTeeth,
+            };
+            delete payload.visit_types;
             if (visit) {
-                await client.put(`/patients/${patientId}/visits/${visit.id}`, form);
+                await client.put(`/patients/${patientId}/visits/${visit.id}`, payload);
                 toast.success('Visit updated successfully');
             } else {
-                await client.post(`/patients/${patientId}/visits`, form);
+                await client.post(`/patients/${patientId}/visits`, payload);
                 toast.success('Visit added successfully');
             }
             onSave();
@@ -59,12 +128,22 @@ function VisitForm({ patientId, visit, onSave, onClose }) {
                     <label className="form-label">Visit Date</label>
                     <input type="date" className="form-input" value={form.visit_date} onChange={set('visit_date')} />
                 </div>
-                <div>
-                    <label className="form-label">Visit Type *</label>
-                    <select className="form-select" value={form.visit_type} onChange={set('visit_type')}>
-                        {VISIT_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-                    </select>
-                </div>
+            </div>
+            <div>
+                <label className="form-label">
+                    Visit Type *
+                    {form.visit_types.length > 0 && (
+                        <span className="ml-2 text-primary font-semibold">
+                            ({form.visit_types.length} selected)
+                        </span>
+                    )}
+                </label>
+                <VisitTypeMultiPicker selected={form.visit_types} onChange={setVisitTypes} />
+                {form.visit_types.length === 0 && (
+                    <p className="text-xs text-amber-500 mt-1.5 flex items-center gap-1">
+                        <span>⚠</span> Select at least one visit type
+                    </p>
+                )}
             </div>
             <div>
                 <label className="form-label">Chief Complaint</label>
@@ -277,9 +356,11 @@ export default function VisitsTab({ patient }) {
                                 <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
                                     <div className="flex-1 min-w-0">
                                         <div className="flex flex-wrap items-center gap-2 mb-2">
-                                            <span className={`badge text-xs ${VISIT_TYPE_COLORS[v.visit_type] || 'badge-gray'}`}>
-                                                {capitalize(v.visit_type)}
-                                            </span>
+                                            {parseVisitTypes(v.visit_type).map(type => (
+                                                <span key={type} className={`badge text-xs ${VISIT_TYPE_COLORS[type] || 'badge-gray'}`}>
+                                                    {VISIT_TYPES.find(t => t.value === type)?.label || capitalize(type)}
+                                                </span>
+                                            ))}
                                             {payment && <span className={`badge text-xs ${payment.class}`}>{payment.label}</span>}
                                             {v.cost && <span className="text-xs font-medium text-text-secondary">{formatCurrency(v.cost)}</span>}
                                         </div>

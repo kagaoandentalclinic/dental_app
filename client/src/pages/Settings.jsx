@@ -1,9 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
     User, Building2, Users, Eye, EyeOff, Plus, Pencil,
     ToggleLeft, ToggleRight, X, Save, KeyRound, ShieldCheck,
-    ClipboardList, Copy, Check, RefreshCw, Link2, Tablet, Download,
+    ClipboardList, Copy, Check, RefreshCw, Link2, Tablet, Download, Camera, Trash2,
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import client from '../api/client';
@@ -55,9 +55,12 @@ function SaveButton({ loading, label = 'Save Changes' }) {
 function AccountTab() {
     const { admin, fetchMe } = useAuth();
     const { showToast } = useToast();
+    const fileInputRef = useRef(null);
 
     const [profile, setProfile] = useState({ full_name: '', email: '', username: '' });
     const [profileLoading, setProfileLoading] = useState(false);
+    const [photoPreview, setPhotoPreview] = useState(null); // local preview before upload
+    const [photoLoading, setPhotoLoading] = useState(false);
 
     const [pwd, setPwd] = useState({ currentPassword: '', newPassword: '', confirm: '' });
     const [pwdLoading, setPwdLoading] = useState(false);
@@ -82,6 +85,52 @@ function AccountTab() {
             setProfileLoading(false);
         }
     };
+
+    // ── Photo handlers ──
+    const handleFileChange = (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        if (file.size > 2 * 1024 * 1024) {
+            showToast('Image must be under 2 MB', 'error');
+            return;
+        }
+        const reader = new FileReader();
+        reader.onload = (ev) => setPhotoPreview(ev.target.result);
+        reader.readAsDataURL(file);
+        // Reset input so same file can be re-selected
+        e.target.value = '';
+    };
+
+    const handlePhotoUpload = async () => {
+        if (!photoPreview) return;
+        setPhotoLoading(true);
+        try {
+            await client.post('/settings/profile/photo', { photo_data: photoPreview });
+            await fetchMe();
+            setPhotoPreview(null);
+            showToast('Profile photo updated!', 'success');
+        } catch (err) {
+            showToast(err.response?.data?.error || 'Failed to upload photo', 'error');
+        } finally {
+            setPhotoLoading(false);
+        }
+    };
+
+    const handlePhotoRemove = async () => {
+        if (!window.confirm('Remove your profile photo?')) return;
+        setPhotoLoading(true);
+        try {
+            await client.delete('/settings/profile/photo');
+            await fetchMe();
+            setPhotoPreview(null);
+            showToast('Profile photo removed', 'success');
+        } catch (err) {
+            showToast(err.response?.data?.error || 'Failed to remove photo', 'error');
+        } finally {
+            setPhotoLoading(false);
+        }
+    };
+
 
     const handlePasswordSubmit = async (e) => {
         e.preventDefault();
@@ -108,7 +157,105 @@ function AccountTab() {
 
     return (
         <div className="space-y-6">
-            {/* Profile */}
+
+            {/* ── Profile Photo ── */}
+            <div className="card">
+                <h3 className="font-semibold text-text-primary mb-4">Profile Photo</h3>
+                <div className="flex flex-col sm:flex-row items-start sm:items-center gap-5">
+
+                    {/* Avatar preview */}
+                    <div className="relative shrink-0">
+                        <div
+                            className="w-24 h-24 rounded-2xl overflow-hidden border-2 border-slate-200 cursor-pointer group"
+                            onClick={() => fileInputRef.current?.click()}
+                            title="Click to change photo"
+                        >
+                            {(photoPreview || admin?.profile_photo) ? (
+                                <img
+                                    src={photoPreview || admin.profile_photo}
+                                    alt="Profile"
+                                    className="w-full h-full object-cover"
+                                />
+                            ) : (
+                                <div className="w-full h-full bg-primary flex items-center justify-center text-white text-2xl font-bold">
+                                    {admin?.full_name?.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() || 'A'}
+                                </div>
+                            )}
+                            {/* Hover overlay */}
+                            <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity rounded-2xl">
+                                <Camera className="w-6 h-6 text-white" />
+                            </div>
+                        </div>
+                        {/* Hidden file input */}
+                        <input
+                            ref={fileInputRef}
+                            type="file"
+                            accept="image/jpeg,image/png,image/webp"
+                            className="hidden"
+                            onChange={handleFileChange}
+                        />
+                    </div>
+
+                    {/* Info + actions */}
+                    <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-text-primary">
+                            {admin?.full_name || 'Admin'}
+                        </p>
+                        <p className="text-xs text-slate-400 capitalize mb-3">{admin?.role}</p>
+
+                        <div className="flex flex-wrap items-center gap-2">
+                            <button
+                                type="button"
+                                onClick={() => fileInputRef.current?.click()}
+                                className="btn-secondary text-xs py-1.5 px-3 gap-1.5"
+                            >
+                                <Camera className="w-3.5 h-3.5" />
+                                {admin?.profile_photo ? 'Change Photo' : 'Upload Photo'}
+                            </button>
+
+                            {photoPreview && (
+                                <button
+                                    type="button"
+                                    onClick={handlePhotoUpload}
+                                    disabled={photoLoading}
+                                    className="btn-primary text-xs py-1.5 px-3 gap-1.5"
+                                >
+                                    <Save className="w-3.5 h-3.5" />
+                                    {photoLoading ? 'Saving…' : 'Save Photo'}
+                                </button>
+                            )}
+
+                            {photoPreview && (
+                                <button
+                                    type="button"
+                                    onClick={() => setPhotoPreview(null)}
+                                    className="btn-ghost text-xs py-1.5 px-3"
+                                >
+                                    Cancel
+                                </button>
+                            )}
+
+                            {admin?.profile_photo && !photoPreview && (
+                                <button
+                                    type="button"
+                                    onClick={handlePhotoRemove}
+                                    disabled={photoLoading}
+                                    className="btn-ghost text-xs py-1.5 px-3 gap-1.5 text-red-500 hover:bg-red-50 hover:text-red-600"
+                                >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                    Remove
+                                </button>
+                            )}
+                        </div>
+
+                        <p className="text-xs text-slate-400 mt-2">
+                            JPG, PNG or WebP · Max 2 MB · Click on the photo to browse
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            {/* ── Profile Information ── */}
             <div className="card">
                 <SectionTitle>Profile Information</SectionTitle>
                 <form onSubmit={handleProfileSubmit} className="space-y-4">

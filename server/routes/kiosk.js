@@ -42,7 +42,7 @@ router.post('/:token', async (req, res) => {
         const sections = normalizePatientPayload(req.body);
         const missing = validateRequiredPatientFields(sections);
         if (missing.length > 0) {
-            return res.status(400).json({ error: 'Last name, first name, and date of birth are required' });
+            return res.status(400).json({ error: 'Last name and first name are required' });
         }
 
         const existingPatientId = await findExistingPatientId(pool, sections.patient);

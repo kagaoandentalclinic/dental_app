@@ -79,7 +79,7 @@ router.post('/login',
 router.get('/me', verifyToken, async (req, res) => {
     try {
         const result = await pool.query(
-            'SELECT id, username, email, full_name, role, created_at, last_login FROM admins WHERE id = $1',
+            'SELECT id, username, email, full_name, role, profile_photo, created_at, last_login FROM admins WHERE id = $1',
             [req.admin.id]
         );
         if (result.rows.length === 0) return res.status(404).json({ error: 'Admin not found' });

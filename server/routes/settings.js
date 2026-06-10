@@ -22,11 +22,48 @@ function requireAdmin(req, res, next) {
 router.get('/profile', async (req, res) => {
     try {
         const result = await pool.query(
-            'SELECT id, username, email, full_name, role, created_at, last_login FROM admins WHERE id = $1',
+            'SELECT id, username, email, full_name, role, profile_photo, created_at, last_login FROM admins WHERE id = $1',
             [req.admin.id]
         );
         if (result.rows.length === 0) return res.status(404).json({ error: 'Admin not found' });
         res.json(result.rows[0]);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+// POST /api/settings/profile/photo
+router.post('/profile/photo', async (req, res) => {
+    try {
+        // Ensure column exists (safe for existing DBs)
+        await pool.query('ALTER TABLE admins ADD COLUMN IF NOT EXISTS profile_photo TEXT');
+
+        const { photo_data } = req.body;
+        if (!photo_data || !photo_data.startsWith('data:image/')) {
+            return res.status(400).json({ error: 'Invalid image data' });
+        }
+        // Rough size guard: base64 of 2MB image ≈ 2.7MB string
+        if (photo_data.length > 3 * 1024 * 1024) {
+            return res.status(413).json({ error: 'Image too large. Please use an image under 2 MB.' });
+        }
+
+        const result = await pool.query(
+            'UPDATE admins SET profile_photo = $1 WHERE id = $2 RETURNING id, profile_photo',
+            [photo_data, req.admin.id]
+        );
+        res.json(result.rows[0]);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+// DELETE /api/settings/profile/photo
+router.delete('/profile/photo', async (req, res) => {
+    try {
+        await pool.query('UPDATE admins SET profile_photo = NULL WHERE id = $1', [req.admin.id]);
+        res.json({ message: 'Photo removed' });
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'Server error' });

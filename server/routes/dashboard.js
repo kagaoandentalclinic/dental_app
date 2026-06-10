@@ -6,10 +6,27 @@ const { verifyToken } = require('../middleware/auth');
 // GET /api/dashboard/stats
 router.get('/stats', verifyToken, async (req, res) => {
     try {
-        const allowedRevenuePeriods = ['day', 'biweek', 'month'];
+        const allowedRevenuePeriods = ['day', 'biweek', 'month', 'custom'];
         const revenuePeriod = allowedRevenuePeriods.includes(req.query.revenuePeriod)
             ? req.query.revenuePeriod
             : 'month';
+
+        // Custom date range validation
+        let customStart = null;
+        let customEnd = null;
+        if (revenuePeriod === 'custom') {
+            const from = req.query.dateFrom;
+            const to   = req.query.dateTo;
+            // Basic ISO date validation (YYYY-MM-DD)
+            const dateRe = /^\d{4}-\d{2}-\d{2}$/;
+            if (from && dateRe.test(from) && to && dateRe.test(to)) {
+                customStart = from;
+                // dateTo is inclusive — add 1 day for the < bound
+                const endDate = new Date(to);
+                endDate.setDate(endDate.getDate() + 1);
+                customEnd = endDate.toISOString().slice(0, 10);
+            }
+        }
 
         const [
             totalPatientsRes,
@@ -26,13 +43,15 @@ router.get('/stats', verifyToken, async (req, res) => {
         WITH bounds AS (
           SELECT
             CASE $1
-              WHEN 'day' THEN CURRENT_DATE::timestamptz
+              WHEN 'day'    THEN CURRENT_DATE::timestamptz
               WHEN 'biweek' THEN (CURRENT_DATE - INTERVAL '13 days')::timestamptz
+              WHEN 'custom' THEN COALESCE($2::timestamptz, date_trunc('month', CURRENT_DATE)::timestamptz)
               ELSE date_trunc('month', CURRENT_DATE)::timestamptz
             END AS period_start,
             CASE $1
-              WHEN 'day' THEN (CURRENT_DATE + INTERVAL '1 day')::timestamptz
+              WHEN 'day'    THEN (CURRENT_DATE + INTERVAL '1 day')::timestamptz
               WHEN 'biweek' THEN (CURRENT_DATE + INTERVAL '1 day')::timestamptz
+              WHEN 'custom' THEN COALESCE($3::timestamptz, (date_trunc('month', CURRENT_DATE) + INTERVAL '1 month')::timestamptz)
               ELSE (date_trunc('month', CURRENT_DATE) + INTERVAL '1 month')::timestamptz
             END AS period_end
         ),
@@ -66,7 +85,7 @@ router.get('/stats', verifyToken, async (req, res) => {
           + ortho_downpayments.total
           + ortho_adjustments.total AS total
         FROM visit_revenue, ortho_downpayments, ortho_adjustments
-      `, [revenuePeriod]),
+      `, [revenuePeriod, customStart, customEnd]),
             pool.query(`
         SELECT p.id, p.last_name, p.first_name, p.date_of_birth, p.sex, p.profile_photo,
           (SELECT MAX(v.visit_date) FROM visits v WHERE v.patient_id = p.id) AS last_visit,

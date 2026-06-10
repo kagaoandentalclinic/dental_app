@@ -50,7 +50,11 @@ export function printVisitReceipt(visit, patient, clinic) {
     const printDate = new Date().toLocaleDateString('en-PH', { year:'numeric', month:'long', day:'numeric' });
     const fullName  = [patient.last_name, patient.first_name, patient.middle_name].filter(Boolean).join(', ');
     const txnNo     = (visit.id || '').replace(/-/g, '').slice(0, 8).toUpperCase();
-    const visitType = (visit.visit_type || '').replace('_', ' ').replace(/\b\w/g, c => c.toUpperCase());
+    const visitType = (visit.visit_type || '')
+        .split(',')
+        .map(t => t.trim().replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()))
+        .filter(Boolean)
+        .join(', ');
     const paymentLabel = { pending:'Pending', paid:'Paid', insurance:'Insurance / HMO', partial:'Partial Payment' }[visit.payment_status] || visit.payment_status;
     const payColor = { pending:'#d97706', paid:'#059669', insurance:'#2563eb', partial:'#ea580c' }[visit.payment_status] || '#555';
 

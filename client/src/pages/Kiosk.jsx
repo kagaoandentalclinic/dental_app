@@ -223,7 +223,6 @@ export default function Kiosk() {
         const errs = {};
         if (!form.last_name.trim()) errs.last_name = 'Last name is required';
         if (!form.first_name.trim()) errs.first_name = 'First name is required';
-        if (!form.date_of_birth) errs.date_of_birth = 'Date of birth is required';
         if (!profilePhoto) errs.profile_photo = 'Patient photo is required';
         setErrors(errs);
         return Object.keys(errs).length === 0;
@@ -428,7 +427,7 @@ export default function Kiosk() {
                                         </Field>
                                     </div>
                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                        <Field label="Date of Birth" required error={errors.date_of_birth}>
+                                        <Field label="Date of Birth" error={errors.date_of_birth}>
                                             <input type="date" className="form-input" value={form.date_of_birth} onChange={set('date_of_birth')} max={todayLocal()} />
                                         </Field>
                                         <Field label="Sex">

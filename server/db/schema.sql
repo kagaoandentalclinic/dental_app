@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS patients (
   last_name VARCHAR(100) NOT NULL,
   first_name VARCHAR(100) NOT NULL,
   middle_name VARCHAR(100),
-  date_of_birth DATE NOT NULL,
+  date_of_birth DATE,
   sex VARCHAR(10) CHECK (sex IN ('male', 'female', 'other')),
   height VARCHAR(20),
   weight VARCHAR(20),
@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS patients (
 
 -- Add profile_photo to existing patients tables (safe to run multiple times)
 ALTER TABLE patients ADD COLUMN IF NOT EXISTS profile_photo TEXT;
+ALTER TABLE patients ALTER COLUMN date_of_birth DROP NOT NULL;
 
 -- ============================================
 -- PATIENT CONTACTS
@@ -188,11 +189,7 @@ CREATE TABLE IF NOT EXISTS visits (
   patient_id UUID REFERENCES patients(id) ON DELETE CASCADE,
   dentist_id UUID REFERENCES admins(id),
   visit_date TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  visit_type VARCHAR(50) NOT NULL CHECK (visit_type IN (
-    'checkup', 'cleaning', 'filling', 'extraction', 'root_canal',
-    'crown', 'emergency', 'consultation', 'whitening', 'braces',
-    'dentures', 'implant', 'other'
-  )),
+  visit_type VARCHAR(100) NOT NULL,
   chief_complaint TEXT,
   diagnosis TEXT,
   treatment_performed TEXT NOT NULL,
@@ -391,3 +388,16 @@ ON CONFLICT (patient_id) DO UPDATE SET
   height = COALESCE(EXCLUDED.height, medical_history.height),
   weight = COALESCE(EXCLUDED.weight, medical_history.weight),
   updated_at = NOW();
+
+-- ============================================
+-- DROP visit_type CHECK constraint to allow multiple types
+-- ============================================
+DO $$
+BEGIN
+    ALTER TABLE visits DROP CONSTRAINT IF EXISTS visits_visit_type_check;
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
+
+-- Widen the column to hold comma-separated type lists
+ALTER TABLE visits ALTER COLUMN visit_type TYPE VARCHAR(200);
+

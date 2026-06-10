@@ -3,6 +3,30 @@ const router = express.Router({ mergeParams: true });
 const pool = require('../db/pool');
 const { verifyToken } = require('../middleware/auth');
 
+function normalizeOptionalText(value) {
+    if (typeof value !== 'string') return value ?? null;
+    const trimmed = value.trim();
+    return trimmed === '' ? null : trimmed;
+}
+
+function normalizeTeethTreated(value) {
+    if (value == null || value === '') return null;
+
+    const rawValues = Array.isArray(value)
+        ? value
+        : String(value).match(/\d+/g) || [];
+
+    const normalized = rawValues
+        .map((item) => Number.parseInt(String(item), 10))
+        .filter((item) => Number.isInteger(item) && item > 0);
+
+    if (normalized.length === 0) {
+        throw new Error('Teeth treated must include at least one valid tooth number');
+    }
+
+    return [...new Set(normalized)];
+}
+
 // GET /api/patients/:id/visits
 router.get('/', verifyToken, async (req, res) => {
     try {
@@ -41,10 +65,14 @@ router.post('/', verifyToken, async (req, res) => {
         teeth_treated, prescriptions, next_appointment, cost, payment_status, notes,
     } = req.body;
 
-    if (!treatment_performed) return res.status(400).json({ error: 'Treatment performed is required' });
-    if (!visit_type) return res.status(400).json({ error: 'Visit type is required' });
+    const normalizedTreatment = normalizeOptionalText(treatment_performed);
+    const normalizedVisitType = normalizeOptionalText(visit_type);
+
+    if (!normalizedTreatment) return res.status(400).json({ error: 'Treatment performed is required' });
+    if (!normalizedVisitType) return res.status(400).json({ error: 'Visit type is required' });
 
     try {
+        const normalizedTeeth = normalizeTeethTreated(teeth_treated);
         const result = await pool.query(`
       INSERT INTO visits (
         patient_id, dentist_id, visit_date, visit_type, chief_complaint,
@@ -55,9 +83,16 @@ router.post('/', verifyToken, async (req, res) => {
     `, [
             req.params.id, req.admin.id,
             visit_date || new Date().toISOString(),
-            visit_type, chief_complaint || null, diagnosis || null,
-            treatment_performed, teeth_treated || null, prescriptions || null,
-            next_appointment || null, cost || null, payment_status || 'pending', notes || null,
+            normalizedVisitType,
+            normalizeOptionalText(chief_complaint),
+            normalizeOptionalText(diagnosis),
+            normalizedTreatment,
+            normalizedTeeth,
+            normalizeOptionalText(prescriptions),
+            next_appointment || null,
+            cost || null,
+            normalizeOptionalText(payment_status) || 'pending',
+            normalizeOptionalText(notes),
         ]);
 
         // Fetch with dentist name
@@ -69,6 +104,9 @@ router.post('/', verifyToken, async (req, res) => {
 
         res.status(201).json(full.rows[0]);
     } catch (err) {
+        if (err.message === 'Teeth treated must include at least one valid tooth number') {
+            return res.status(400).json({ error: err.message });
+        }
         console.error(err);
         res.status(500).json({ error: 'Server error' });
     }
@@ -80,8 +118,14 @@ router.put('/:visitId', verifyToken, async (req, res) => {
         visit_date, visit_type, chief_complaint, diagnosis, treatment_performed,
         teeth_treated, prescriptions, next_appointment, cost, payment_status, notes,
     } = req.body;
+    const normalizedTreatment = normalizeOptionalText(treatment_performed);
+    const normalizedVisitType = normalizeOptionalText(visit_type);
+
+    if (!normalizedTreatment) return res.status(400).json({ error: 'Treatment performed is required' });
+    if (!normalizedVisitType) return res.status(400).json({ error: 'Visit type is required' });
 
     try {
+        const normalizedTeeth = normalizeTeethTreated(teeth_treated);
         const result = await pool.query(`
       UPDATE visits SET
         visit_date=$1, visit_type=$2, chief_complaint=$3, diagnosis=$4,
@@ -90,9 +134,17 @@ router.put('/:visitId', verifyToken, async (req, res) => {
       WHERE id=$12
       RETURNING *
     `, [
-            visit_date, visit_type, chief_complaint || null, diagnosis || null,
-            treatment_performed, teeth_treated || null, prescriptions || null,
-            next_appointment || null, cost || null, payment_status || 'pending', notes || null,
+            visit_date || new Date().toISOString(),
+            normalizedVisitType,
+            normalizeOptionalText(chief_complaint),
+            normalizeOptionalText(diagnosis),
+            normalizedTreatment,
+            normalizedTeeth,
+            normalizeOptionalText(prescriptions),
+            next_appointment || null,
+            cost || null,
+            normalizeOptionalText(payment_status) || 'pending',
+            normalizeOptionalText(notes),
             req.params.visitId,
         ]);
         if (result.rows.length === 0) return res.status(404).json({ error: 'Visit not found' });
@@ -105,6 +157,9 @@ router.put('/:visitId', verifyToken, async (req, res) => {
 
         res.json(full.rows[0]);
     } catch (err) {
+        if (err.message === 'Teeth treated must include at least one valid tooth number') {
+            return res.status(400).json({ error: err.message });
+        }
         console.error(err);
         res.status(500).json({ error: 'Server error' });
     }

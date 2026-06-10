@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import client from '../api/client';
+import { clearStoredToken, getStoredToken, storeToken } from '../utils/authStorage';
 
 const AuthContext = createContext(null);
 
@@ -8,13 +9,16 @@ export function AuthProvider({ children }) {
     const [loading, setLoading] = useState(true);
 
     const fetchMe = useCallback(async () => {
-        const token = localStorage.getItem('dental_token');
+        const token = getStoredToken();
         if (!token) { setLoading(false); return; }
         try {
             const res = await client.get('/auth/me');
             setAdmin(res.data);
-        } catch {
-            localStorage.removeItem('dental_token');
+        } catch (err) {
+            if (err.response?.status === 401) {
+                clearStoredToken();
+                setAdmin(null);
+            }
         } finally {
             setLoading(false);
         }
@@ -24,13 +28,13 @@ export function AuthProvider({ children }) {
 
     const login = async (username, password) => {
         const res = await client.post('/auth/login', { username, password });
-        localStorage.setItem('dental_token', res.data.token);
+        storeToken(res.data.token);
         setAdmin(res.data.admin);
         return res.data.admin;
     };
 
     const logout = () => {
-        localStorage.removeItem('dental_token');
+        clearStoredToken();
         setAdmin(null);
     };
 

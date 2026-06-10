@@ -6,7 +6,7 @@ import { useAuth } from '../context/AuthContext';
 import LoadingSpinner from '../components/LoadingSpinner';
 
 export default function Login() {
-    const [form, setForm] = useState({ username: '', password: '', remember: false });
+    const [form, setForm] = useState({ username: '', password: '' });
     const [showPass, setShowPass] = useState(false);
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
@@ -177,20 +177,6 @@ export default function Login() {
                                     {showPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                                 </button>
                             </div>
-                        </div>
-
-                        {/* Remember me */}
-                        <div className="flex items-center gap-2.5">
-                            <input
-                                id="remember"
-                                type="checkbox"
-                                className="w-4 h-4 rounded-md border-slate-300 text-primary focus:ring-primary/30 cursor-pointer"
-                                checked={form.remember}
-                                onChange={e => setForm(f => ({ ...f, remember: e.target.checked }))}
-                            />
-                            <label htmlFor="remember" className="text-sm text-slate-500 cursor-pointer select-none">
-                                Remember me for 30 days
-                            </label>
                         </div>
 
                         {/* Error */}

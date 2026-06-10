@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS admins (
   created_at TIMESTAMPTZ DEFAULT NOW(),
   last_login TIMESTAMPTZ
 );
+ALTER TABLE admins ADD COLUMN IF NOT EXISTS profile_photo TEXT;
 
 -- ============================================
 -- PATIENTS
@@ -400,4 +401,3 @@ END $$;
 
 -- Widen the column to hold comma-separated type lists
 ALTER TABLE visits ALTER COLUMN visit_type TYPE VARCHAR(200);
-

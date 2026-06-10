@@ -55,7 +55,7 @@ router.post('/login',
             const token = jwt.sign(
                 { id: admin.id, username: admin.username, role: admin.role, full_name: admin.full_name },
                 process.env.JWT_SECRET || 'dental_secret_key',
-                { expiresIn: '24h' }
+                { expiresIn: '30d' }
             );
 
             res.json({

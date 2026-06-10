@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { clearStoredToken, getStoredToken } from '../utils/authStorage';
 
 const client = axios.create({
     baseURL: import.meta.env.VITE_API_URL || 'http://localhost:3001/api',
@@ -7,7 +8,7 @@ const client = axios.create({
 
 // Attach JWT to every request
 client.interceptors.request.use((config) => {
-    const token = localStorage.getItem('dental_token');
+    const token = getStoredToken();
     if (token) config.headers.Authorization = `Bearer ${token}`;
     return config;
 });
@@ -18,7 +19,7 @@ client.interceptors.response.use(
     (err) => {
         const isLoginEndpoint = err.config?.url?.includes('/auth/login');
         if (err.response?.status === 401 && !isLoginEndpoint) {
-            localStorage.removeItem('dental_token');
+            clearStoredToken();
             window.location.href = '/login';
         }
         return Promise.reject(err);

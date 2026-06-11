@@ -223,7 +223,6 @@ export default function Kiosk() {
         const errs = {};
         if (!form.last_name.trim()) errs.last_name = 'Last name is required';
         if (!form.first_name.trim()) errs.first_name = 'First name is required';
-        if (!profilePhoto) errs.profile_photo = 'Patient photo is required';
         setErrors(errs);
         return Object.keys(errs).length === 0;
     };
@@ -537,7 +536,7 @@ export default function Kiosk() {
                                 <div className="flex items-center gap-2 pb-2 border-b border-border">
                                     <Camera className="w-4 h-4 text-primary" />
                                     <h3 className="text-sm font-semibold text-primary uppercase tracking-wide">Patient Photo</h3>
-                                    <span className="text-red-500 ml-0.5 text-sm font-bold">*</span>
+                                    <span className="text-xs font-medium uppercase tracking-wide text-text-secondary">Optional</span>
                                 </div>
                                 {profilePhoto ? (
                                     <div className="flex flex-col items-center gap-3">
@@ -551,15 +550,11 @@ export default function Kiosk() {
                                     </div>
                                 ) : (
                                     <div className="flex flex-col items-center gap-4 py-4">
-                                        <div className={`w-36 h-36 rounded-2xl border-2 border-dashed flex items-center justify-center bg-surface
-                                            ${errors.profile_photo ? 'border-red-400 bg-red-50' : 'border-border'}`}>
-                                            <Camera className={`w-10 h-10 ${errors.profile_photo ? 'text-red-400' : 'text-text-secondary opacity-40'}`} />
+                                        <div className="w-36 h-36 rounded-2xl border-2 border-dashed border-border flex items-center justify-center bg-surface">
+                                            <Camera className="w-10 h-10 text-text-secondary opacity-40" />
                                         </div>
-                                        {errors.profile_photo && (
-                                            <p className="text-sm text-red-500 font-medium">{errors.profile_photo}</p>
-                                        )}
                                         <p className="text-sm text-text-secondary text-center">
-                                            Please take a clear photo of your face for your patient record.
+                                            Add a clear photo of your face for your patient record if you would like.
                                         </p>
                                         <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
                                             <button type="button" className="btn-primary w-full sm:w-auto" onClick={openCamera}>

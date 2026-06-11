@@ -216,7 +216,6 @@ export default function PatientIntake() {
     const handleSubmit = async (e) => {
         e.preventDefault();
         const nextErrors = validatePatientForm(form);
-        if (!profilePhoto) nextErrors.profile_photo = 'Patient photo is required';
         setErrors(nextErrors);
 
         if (Object.keys(nextErrors).length > 0) {
@@ -382,7 +381,7 @@ export default function PatientIntake() {
 
                             {step === 3 && (
                                 <div className="space-y-5">
-                                    <Section title="Patient Photo" icon={Camera}>
+                                    <Section title="Patient Photo (Optional)" icon={Camera}>
                                         {profilePhoto ? (
                                             <div className="flex flex-col items-center gap-3">
                                                 <img src={profilePhoto} alt="Patient photo" className="w-40 h-40 rounded-2xl object-cover border-4 border-primary/20 shadow-md" />
@@ -396,14 +395,11 @@ export default function PatientIntake() {
                                             </div>
                                         ) : (
                                             <div className="flex flex-col items-center gap-4 py-4">
-                                                <div className={`w-36 h-36 rounded-2xl border-2 border-dashed flex items-center justify-center bg-surface ${errors.profile_photo ? 'border-red-400 bg-red-50' : 'border-border'}`}>
-                                                    <Camera className={`w-10 h-10 ${errors.profile_photo ? 'text-red-400' : 'text-text-secondary opacity-40'}`} />
+                                                <div className="w-36 h-36 rounded-2xl border-2 border-dashed border-border flex items-center justify-center bg-surface">
+                                                    <Camera className="w-10 h-10 text-text-secondary opacity-40" />
                                                 </div>
-                                                {errors.profile_photo && (
-                                                    <p className="text-sm text-red-500 font-medium">{errors.profile_photo}</p>
-                                                )}
                                                 <p className="text-sm text-text-secondary text-center">
-                                                    Please take a clear photo of your face for your patient record.
+                                                    Add a clear photo of your face for your patient record if you would like.
                                                 </p>
                                                 <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
                                                     <button type="button" className="btn-primary w-full sm:w-auto" onClick={openCamera}>

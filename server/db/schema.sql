@@ -160,7 +160,7 @@ CREATE TABLE IF NOT EXISTS dental_chart (
   patient_id UUID REFERENCES patients(id) ON DELETE CASCADE,
   tooth_number INTEGER NOT NULL CHECK (tooth_number >= 1),
   status VARCHAR(20) DEFAULT 'healthy' CHECK (status IN (
-    'healthy', 'cavity', 'filled', 'crown', 'missing',
+    'healthy', 'cavity', 'root_fragment', 'filled', 'crown', 'missing',
     'root_canal', 'extracted', 'implant', 'bridge', 'veneer'
   )),
   surface VARCHAR(50),
@@ -179,8 +179,22 @@ BEGIN
     ALTER TABLE dental_chart DROP CONSTRAINT IF EXISTS dental_chart_tooth_number_check;
 EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
+DO $$
+BEGIN
+    ALTER TABLE dental_chart DROP CONSTRAINT IF EXISTS dental_chart_status_check;
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
 ALTER TABLE dental_chart ADD COLUMN IF NOT EXISTS is_extra BOOLEAN DEFAULT false;
 ALTER TABLE dental_chart ADD COLUMN IF NOT EXISTS extra_label VARCHAR(50);
+DO $$
+BEGIN
+    ALTER TABLE dental_chart ADD CONSTRAINT dental_chart_status_check
+      CHECK (status IN (
+        'healthy', 'cavity', 'root_fragment', 'filled', 'crown', 'missing',
+        'root_canal', 'extracted', 'implant', 'bridge', 'veneer'
+      ));
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
 -- ============================================
 -- VISITS

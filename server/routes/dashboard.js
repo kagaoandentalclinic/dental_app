@@ -94,7 +94,7 @@ router.get('/stats', verifyToken, async (req, res) => {
             pool.query(`
         SELECT p.id, p.last_name, p.first_name, p.date_of_birth, p.sex, p.profile_photo,
           (SELECT MAX(v.visit_date) FROM visits v WHERE v.patient_id = p.id) AS last_visit,
-          (SELECT COUNT(*) FROM dental_chart dc WHERE dc.patient_id = p.id AND dc.status != 'healthy') AS dental_issues
+          (SELECT COUNT(*) FROM dental_chart dc WHERE dc.patient_id = p.id AND dc.status IN ('cavity', 'root_fragment')) AS dental_issues
         FROM patients p WHERE p.is_active = true
         ORDER BY p.created_at DESC LIMIT 5
       `),

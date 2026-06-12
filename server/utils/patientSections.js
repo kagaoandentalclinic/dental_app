@@ -367,7 +367,7 @@ async function getPatientDetail(pool, patientId) {
             CASE WHEN pi.patient_id IS NOT NULL THEN pi.insurance_id ELSE p.insurance_id END AS insurance_id,
             CASE WHEN mh.patient_id IS NOT NULL THEN mh.height ELSE p.height END AS height,
             CASE WHEN mh.patient_id IS NOT NULL THEN mh.weight ELSE p.weight END AS weight,
-            (SELECT COUNT(*) FROM dental_chart dc WHERE dc.patient_id = p.id AND dc.status != 'healthy') AS dental_issues,
+            (SELECT COUNT(*) FROM dental_chart dc WHERE dc.patient_id = p.id AND dc.status IN ('cavity', 'root_fragment')) AS dental_issues,
             (SELECT COUNT(*) FROM visits v WHERE v.patient_id = p.id) AS total_visits,
             (SELECT MAX(v.visit_date) FROM visits v WHERE v.patient_id = p.id) AS last_visit
          FROM patients p

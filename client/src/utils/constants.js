@@ -1,7 +1,8 @@
 // Tooth statuses
 export const TOOTH_STATUSES = [
     { value: 'healthy', label: 'Healthy', color: '#28A745', bg: '#d4edda', text: '#155724' },
-    { value: 'cavity', label: 'Cavity', color: '#DC3545', bg: '#f8d7da', text: '#721c24' },
+    { value: 'cavity', label: 'Caries', color: '#DC3545', bg: '#f8d7da', text: '#721c24' },
+    { value: 'root_fragment', label: 'Root Fragment', color: '#B45309', bg: '#fef3c7', text: '#78350f' },
     { value: 'filled', label: 'Filled', color: '#17A2B8', bg: '#d1ecf1', text: '#0c5460' },
     { value: 'crown', label: 'Crown', color: '#F0AD4E', bg: '#fff3cd', text: '#856404' },
     { value: 'missing', label: 'Missing', color: '#6C757D', bg: '#e2e3e5', text: '#383d41' },

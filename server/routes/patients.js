@@ -93,7 +93,7 @@ router.get('/', verifyToken, async (req, res) => {
                 p.profile_photo,
                 (
                   SELECT COUNT(*) FROM dental_chart dc
-                  WHERE dc.patient_id = p.id AND dc.status != 'healthy'
+                  WHERE dc.patient_id = p.id AND dc.status IN ('cavity', 'root_fragment')
                 ) AS dental_issues,
                 (
                   SELECT MAX(v.visit_date) FROM visits v WHERE v.patient_id = p.id

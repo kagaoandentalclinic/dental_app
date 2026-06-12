@@ -3,6 +3,47 @@ const router = express.Router({ mergeParams: true });
 const pool = require('../db/pool');
 const { verifyToken } = require('../middleware/auth');
 
+const VALID_TOOTH_STATUSES = new Set([
+    'healthy',
+    'cavity',
+    'root_fragment',
+    'filled',
+    'crown',
+    'missing',
+    'root_canal',
+    'extracted',
+    'implant',
+    'bridge',
+    'veneer',
+]);
+const DENTAL_CHART_STATUS_CHECK = `
+    CHECK (status IN (
+        'healthy', 'cavity', 'root_fragment', 'filled', 'crown', 'missing',
+        'root_canal', 'extracted', 'implant', 'bridge', 'veneer'
+    ))
+`;
+let dentalChartSchemaReadyPromise = null;
+
+function isValidToothStatus(status) {
+    return VALID_TOOTH_STATUSES.has(status || 'healthy');
+}
+
+async function ensureDentalChartSchema() {
+    if (!dentalChartSchemaReadyPromise) {
+        dentalChartSchemaReadyPromise = (async () => {
+            await pool.query('ALTER TABLE dental_chart DROP CONSTRAINT IF EXISTS dental_chart_status_check');
+            await pool.query(
+                `ALTER TABLE dental_chart ADD CONSTRAINT dental_chart_status_check ${DENTAL_CHART_STATUS_CHECK}`
+            );
+        })().catch(err => {
+            dentalChartSchemaReadyPromise = null;
+            throw err;
+        });
+    }
+
+    return dentalChartSchemaReadyPromise;
+}
+
 // Helper: ensure all 32 teeth exist for a patient
 async function ensureTeeth(patientId, adminId) {
     const existing = await pool.query(
@@ -30,6 +71,7 @@ async function ensureTeeth(patientId, adminId) {
 router.get('/', verifyToken, async (req, res) => {
     try {
         const { id } = req.params;
+        await ensureDentalChartSchema();
         await ensureTeeth(id, req.admin.id);
         const result = await pool.query(
             `SELECT dc.*, a.full_name AS updated_by_name
@@ -50,9 +92,16 @@ router.get('/', verifyToken, async (req, res) => {
 router.put('/bulk', verifyToken, async (req, res) => {
     const { teeth } = req.body;
     if (!Array.isArray(teeth)) return res.status(400).json({ error: 'teeth must be an array' });
+    const invalidTooth = teeth.find(t => !isValidToothStatus(t.status));
+    if (invalidTooth) {
+        return res.status(400).json({
+            error: `Invalid tooth status for tooth #${invalidTooth.tooth_number || 'unknown'}`,
+        });
+    }
 
     const client = await pool.connect();
     try {
+        await ensureDentalChartSchema();
         await client.query('BEGIN');
         for (const t of teeth) {
             await client.query(`
@@ -76,7 +125,10 @@ router.put('/bulk', verifyToken, async (req, res) => {
     } catch (err) {
         await client.query('ROLLBACK');
         console.error(err);
-        res.status(500).json({ error: 'Server error' });
+        if (err.code === '23514') {
+            return res.status(400).json({ error: 'The selected tooth status is not supported yet. Please refresh and try again.' });
+        }
+        res.status(500).json({ error: 'Failed to save dental chart' });
     } finally {
         client.release();
     }
@@ -86,8 +138,12 @@ router.put('/bulk', verifyToken, async (req, res) => {
 router.put('/:toothNumber', verifyToken, async (req, res) => {
     const { id, toothNumber } = req.params;
     const { status, surface, notes, extra_label } = req.body;
+    if (!isValidToothStatus(status)) {
+        return res.status(400).json({ error: `Invalid tooth status for tooth #${toothNumber}` });
+    }
 
     try {
+        await ensureDentalChartSchema();
         const result = await pool.query(`
       INSERT INTO dental_chart (patient_id, tooth_number, status, surface, notes, extra_label, updated_by, last_updated)
       VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
@@ -103,7 +159,10 @@ router.put('/:toothNumber', verifyToken, async (req, res) => {
         res.json(result.rows[0]);
     } catch (err) {
         console.error(err);
-        res.status(500).json({ error: 'Server error' });
+        if (err.code === '23514') {
+            return res.status(400).json({ error: 'The selected tooth status is not supported yet. Please refresh and try again.' });
+        }
+        res.status(500).json({ error: 'Failed to save tooth status' });
     }
 });
 
@@ -117,6 +176,7 @@ router.post('/extra', verifyToken, async (req, res) => {
     }
 
     try {
+        await ensureDentalChartSchema();
         // Find next available tooth number >= 33
         const maxRes = await pool.query(
             'SELECT COALESCE(MAX(tooth_number), 32) AS max_num FROM dental_chart WHERE patient_id = $1 AND tooth_number >= 33',

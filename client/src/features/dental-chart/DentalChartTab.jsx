@@ -11,6 +11,7 @@ import ConfirmDialog from '../../components/ConfirmDialog';
 
 const STANDARD_TOOTH_NUMBERS = Array.from({ length: 32 }, (_, index) => index + 1);
 const NOTATION_OPTIONS = ['Universal', 'FDI', 'Palmer'];
+const ISSUE_STATUS_VALUES = new Set(['cavity', 'root_fragment']);
 const UNIVERSAL_TO_FDI = {
     1: '18', 2: '17', 3: '16', 4: '15', 5: '14', 6: '13', 7: '12', 8: '11',
     9: '21', 10: '22', 11: '23', 12: '24', 13: '25', 14: '26', 15: '27', 16: '28',
@@ -107,8 +108,8 @@ export default function DentalChartTab({ patient }) {
             await client.put(`/patients/${patient.id}/dental-chart/bulk`, { teeth: teethArr });
             toast.success('Dental chart saved!');
             await fetchChart();
-        } catch {
-            toast.error('Failed to save chart');
+        } catch (err) {
+            toast.error(err.response?.data?.error || 'Failed to save chart');
         } finally {
             setSaving(false);
         }
@@ -128,8 +129,8 @@ export default function DentalChartTab({ patient }) {
             setExtraLabel('');
             setAddExtraOpen(false);
             toast.success('Extra tooth added');
-        } catch {
-            toast.error('Failed to add extra tooth');
+        } catch (err) {
+            toast.error(err.response?.data?.error || 'Failed to add extra tooth');
         } finally {
             setAddingExtra(false);
         }
@@ -145,8 +146,8 @@ export default function DentalChartTab({ patient }) {
                 return next;
             });
             toast.success('Extra tooth removed');
-        } catch {
-            toast.error('Failed to remove extra tooth');
+        } catch (err) {
+            toast.error(err.response?.data?.error || 'Failed to remove extra tooth');
         } finally {
             setDeleteExtraTarget(null);
         }
@@ -171,7 +172,7 @@ export default function DentalChartTab({ patient }) {
     const standardTeeth = STANDARD_TOOTH_NUMBERS.map(getTooth);
     const allTeeth = [...standardTeeth, ...currentExtraTeeth];
     const healthy = allTeeth.filter(t => t.status === 'healthy').length;
-    const issues = allTeeth.filter(t => t.status !== 'healthy').length;
+    const issues = allTeeth.filter(t => ISSUE_STATUS_VALUES.has(t.status)).length;
     const hasChanges = Object.keys(changes).length > 0;
     const isMobile = viewportMode === 'mobile';
     const isTablet = viewportMode === 'tablet';

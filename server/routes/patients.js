@@ -3,6 +3,8 @@ const { body, validationResult } = require('express-validator');
 const router = express.Router();
 const pool = require('../db/pool');
 const { verifyToken } = require('../middleware/auth');
+const { getDentalIssueSql } = require('../utils/dentalChart');
+const { logAudit } = require('../utils/auditLogs');
 const { publicFormLimiter, checkHoneypot, checkTiming, checkDuplicateCooldown, checkDeviceId } = require('../middleware/antiSpam');
 const {
     normalizePatientPayload,
@@ -32,6 +34,13 @@ async function respondWithPatientDetail(res, patientId, statusCode = 200) {
         return res.status(404).json({ error: 'Patient not found' });
     }
     return res.status(statusCode).json(detail);
+}
+
+function buildAuditActor(admin, source) {
+    if (!admin) {
+        return { adminId: null, role: 'public', source };
+    }
+    return { adminId: admin.id, role: admin.role, source };
 }
 
 function handleValidationErrors(req, res) {
@@ -93,7 +102,7 @@ router.get('/', verifyToken, async (req, res) => {
                 p.profile_photo,
                 (
                   SELECT COUNT(*) FROM dental_chart dc
-                  WHERE dc.patient_id = p.id AND dc.status IN ('cavity', 'root_fragment')
+                  WHERE dc.patient_id = p.id AND ${getDentalIssueSql('dc')}
                 ) AS dental_issues,
                 (
                   SELECT MAX(v.visit_date) FROM visits v WHERE v.patient_id = p.id
@@ -149,13 +158,13 @@ router.post('/intake', publicFormLimiter, checkHoneypot, checkTiming, checkDevic
     try {
         const existingPatientId = await findExistingPatientId(pool, sections.patient);
         if (existingPatientId) {
-            const updated = await updatePatientSections(pool, existingPatientId, sections, null);
+            const updated = await updatePatientSections(pool, existingPatientId, sections, null, buildAuditActor(null, 'public_intake'));
             if (!updated) return res.status(404).json({ error: 'Patient not found' });
             res.locals.recordSpamKey?.();
             return res.json({ updated: true, patientName: sections.patient.first_name });
         }
 
-        await createPatientWithSections(pool, sections, null);
+        await createPatientWithSections(pool, sections, null, buildAuditActor(null, 'public_intake'));
         res.locals.recordSpamKey?.();
         res.status(201).json({ updated: false, patientName: sections.patient.first_name });
     } catch (err) {
@@ -187,7 +196,7 @@ router.post('/', verifyToken, [
             });
         }
 
-        const inserted = await createPatientWithSections(pool, sections, req.admin.id);
+        const inserted = await createPatientWithSections(pool, sections, req.admin.id, buildAuditActor(req.admin, 'staff_portal'));
         await respondWithPatientDetail(res, inserted.id, 201);
     } catch (err) {
         console.error(err);
@@ -204,7 +213,7 @@ router.put('/:id', verifyToken, [
     const sections = normalizePatientPayload(req.body);
 
     try {
-        const updated = await updatePatientSections(pool, req.params.id, sections, req.admin.id);
+        const updated = await updatePatientSections(pool, req.params.id, sections, req.admin.id, buildAuditActor(req.admin, 'staff_portal'));
         if (!updated) return res.status(404).json({ error: 'Patient not found' });
         await respondWithPatientDetail(res, req.params.id);
     } catch (err) {
@@ -222,7 +231,7 @@ router.put('/:id/core', verifyToken, [
     const sections = normalizePatientPayload(req.body);
 
     try {
-        const updated = await updateCoreSection(pool, req.params.id, sections.patient);
+        const updated = await updateCoreSection(pool, req.params.id, sections.patient, buildAuditActor(req.admin, 'staff_portal'));
         if (!updated) return res.status(404).json({ error: 'Patient not found' });
         await respondWithPatientDetail(res, req.params.id);
     } catch (err) {
@@ -235,7 +244,7 @@ router.put('/:id/core', verifyToken, [
 router.put('/:id/contact', verifyToken, async (req, res) => {
     try {
         const sections = normalizePatientPayload(req.body);
-        const updated = await updateContactSection(pool, req.params.id, sections.contact);
+        const updated = await updateContactSection(pool, req.params.id, sections.contact, buildAuditActor(req.admin, 'staff_portal'));
         if (!updated) return res.status(404).json({ error: 'Patient not found' });
         await respondWithPatientDetail(res, req.params.id);
     } catch (err) {
@@ -248,7 +257,7 @@ router.put('/:id/contact', verifyToken, async (req, res) => {
 router.put('/:id/profile', verifyToken, async (req, res) => {
     try {
         const sections = normalizePatientPayload(req.body);
-        const updated = await updateProfileSection(pool, req.params.id, sections.profile);
+        const updated = await updateProfileSection(pool, req.params.id, sections.profile, buildAuditActor(req.admin, 'staff_portal'));
         if (!updated) return res.status(404).json({ error: 'Patient not found' });
         await respondWithPatientDetail(res, req.params.id);
     } catch (err) {
@@ -261,7 +270,7 @@ router.put('/:id/profile', verifyToken, async (req, res) => {
 router.put('/:id/insurance', verifyToken, async (req, res) => {
     try {
         const sections = normalizePatientPayload(req.body);
-        const updated = await updateInsuranceSection(pool, req.params.id, sections.insurance);
+        const updated = await updateInsuranceSection(pool, req.params.id, sections.insurance, buildAuditActor(req.admin, 'staff_portal'));
         if (!updated) return res.status(404).json({ error: 'Patient not found' });
         await respondWithPatientDetail(res, req.params.id);
     } catch (err) {
@@ -273,11 +282,23 @@ router.put('/:id/insurance', verifyToken, async (req, res) => {
 // DELETE /api/patients/:id - soft delete
 router.delete('/:id', verifyToken, async (req, res) => {
     try {
+        const beforeDetail = await getPatientDetail(pool, req.params.id);
         const result = await pool.query(
             'UPDATE patients SET is_active=false, updated_at=NOW() WHERE id=$1 AND is_active=true RETURNING id',
             [req.params.id]
         );
         if (result.rows.length === 0) return res.status(404).json({ error: 'Patient not found' });
+        await logAudit(pool, {
+            actorAdminId: req.admin.id,
+            actorRole: req.admin.role,
+            entityType: 'patient',
+            entityId: req.params.id,
+            patientId: req.params.id,
+            action: 'patient.archive',
+            beforeData: beforeDetail,
+            afterData: { id: req.params.id, is_active: false },
+            metadata: { source: 'staff_portal' },
+        });
         res.json({ message: 'Patient deleted successfully' });
     } catch (err) {
         console.error(err);

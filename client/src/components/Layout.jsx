@@ -151,6 +151,11 @@ export default function Layout() {
         return 'Good evening';
     };
 
+    // Close mobile sidebar on route change
+    useEffect(() => {
+        setSidebarOpen(false);
+    }, [location.pathname]);
+
     useEffect(() => {
         client.get('/appointments/notifications')
             .then(r => setBadgeCount((r.data.pending?.length || 0) + (r.data.today?.length || 0)))
@@ -182,20 +187,21 @@ export default function Layout() {
                     {/* Left: hamburger + page context */}
                     <div className="flex items-center gap-3 min-w-0">
                         <button
-                            className="lg:hidden btn-icon"
+                            className="lg:hidden btn-icon min-w-[44px] min-h-[44px]"
                             onClick={() => setSidebarOpen(true)}
                             aria-label="Open menu"
                         >
                             <Menu className="w-5 h-5" />
                         </button>
 
-                        {/* Page title shown on desktop */}
-                        <div className="hidden sm:block">
+
+                        {/* Page title — always visible */}
+                        <div>
                             <h1 className="text-[15px] font-bold text-text-primary leading-tight">
                                 {pageInfo.title}
                             </h1>
                             {pageInfo.subtitle && (
-                                <p className="text-xs text-slate-400 leading-tight">
+                                <p className="hidden sm:block text-xs text-slate-400 leading-tight">
                                     {pageInfo.subtitle}
                                 </p>
                             )}

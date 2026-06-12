@@ -20,7 +20,7 @@ client.interceptors.response.use(
         const isLoginEndpoint = err.config?.url?.includes('/auth/login');
         if (err.response?.status === 401 && !isLoginEndpoint) {
             clearStoredToken();
-            window.location.href = '/login';
+            window.location.href = '/admin/login';
         }
         return Promise.reject(err);
     }

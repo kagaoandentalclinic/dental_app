@@ -2,30 +2,30 @@ const express = require('express');
 const router = express.Router({ mergeParams: true });
 const pool = require('../db/pool');
 const { verifyToken } = require('../middleware/auth');
-
-const VALID_TOOTH_STATUSES = new Set([
-    'healthy',
-    'cavity',
-    'root_fragment',
-    'filled',
-    'crown',
-    'missing',
-    'root_canal',
-    'extracted',
-    'implant',
-    'bridge',
-    'veneer',
-]);
+const logger = require('../utils/logger');
+const { TOOTH_STATUSES_SQL, isValidToothStatus } = require('../utils/dentalChart');
+const { logAudit } = require('../utils/auditLogs');
 const DENTAL_CHART_STATUS_CHECK = `
-    CHECK (status IN (
-        'healthy', 'cavity', 'root_fragment', 'filled', 'crown', 'missing',
-        'root_canal', 'extracted', 'implant', 'bridge', 'veneer'
-    ))
+    CHECK (status IN (${TOOTH_STATUSES_SQL}))
 `;
 let dentalChartSchemaReadyPromise = null;
 
-function isValidToothStatus(status) {
-    return VALID_TOOTH_STATUSES.has(status || 'healthy');
+async function getDentalChartSnapshot(db, patientId, toothNumbers) {
+    const values = [patientId];
+    let whereSql = 'patient_id = $1';
+    if (Array.isArray(toothNumbers) && toothNumbers.length > 0) {
+        values.push(toothNumbers);
+        whereSql += ` AND tooth_number = ANY($${values.length}::int[])`;
+    }
+
+    const result = await db.query(
+        `SELECT tooth_number, status, surface, notes, is_extra, extra_label, updated_by, last_updated
+         FROM dental_chart
+         WHERE ${whereSql}
+         ORDER BY tooth_number`,
+        values
+    );
+    return result.rows;
 }
 
 async function ensureDentalChartSchema() {
@@ -83,7 +83,7 @@ router.get('/', verifyToken, async (req, res) => {
         );
         res.json(result.rows);
     } catch (err) {
-        console.error(err);
+        logger.error('Failed to load dental chart', err, { patientId: req.params.id });
         res.status(500).json({ error: 'Server error' });
     }
 });
@@ -103,6 +103,8 @@ router.put('/bulk', verifyToken, async (req, res) => {
     try {
         await ensureDentalChartSchema();
         await client.query('BEGIN');
+        const toothNumbers = teeth.map(t => Number(t.tooth_number)).filter(Number.isInteger);
+        const beforeSnapshot = await getDentalChartSnapshot(client, req.params.id, toothNumbers);
         for (const t of teeth) {
             await client.query(`
         INSERT INTO dental_chart (patient_id, tooth_number, status, surface, notes, updated_by, last_updated)
@@ -115,6 +117,18 @@ router.put('/bulk', verifyToken, async (req, res) => {
           last_updated = NOW()
       `, [req.params.id, t.tooth_number, t.status || 'healthy', t.surface || null, t.notes || null, req.admin.id]);
         }
+        const afterSnapshot = await getDentalChartSnapshot(client, req.params.id, toothNumbers);
+        await logAudit(client, {
+            actorAdminId: req.admin.id,
+            actorRole: req.admin.role,
+            entityType: 'dental_chart',
+            entityId: req.params.id,
+            patientId: req.params.id,
+            action: 'dental_chart.bulk_update',
+            beforeData: beforeSnapshot,
+            afterData: afterSnapshot,
+            metadata: { changed_tooth_numbers: toothNumbers },
+        });
         await client.query('COMMIT');
 
         const result = await pool.query(
@@ -124,7 +138,7 @@ router.put('/bulk', verifyToken, async (req, res) => {
         res.json(result.rows);
     } catch (err) {
         await client.query('ROLLBACK');
-        console.error(err);
+        logger.error('Failed to save dental chart', err, { patientId: req.params.id });
         if (err.code === '23514') {
             return res.status(400).json({ error: 'The selected tooth status is not supported yet. Please refresh and try again.' });
         }
@@ -144,6 +158,7 @@ router.put('/:toothNumber', verifyToken, async (req, res) => {
 
     try {
         await ensureDentalChartSchema();
+        const beforeSnapshot = await getDentalChartSnapshot(pool, id, [parseInt(toothNumber)]);
         const result = await pool.query(`
       INSERT INTO dental_chart (patient_id, tooth_number, status, surface, notes, extra_label, updated_by, last_updated)
       VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
@@ -156,9 +171,24 @@ router.put('/:toothNumber', verifyToken, async (req, res) => {
         last_updated = NOW()
       RETURNING *
     `, [id, parseInt(toothNumber), status || 'healthy', surface || null, notes || null, extra_label || null, req.admin.id]);
+        const afterSnapshot = await getDentalChartSnapshot(pool, id, [parseInt(toothNumber)]);
+        await logAudit(pool, {
+            actorAdminId: req.admin.id,
+            actorRole: req.admin.role,
+            entityType: 'dental_chart',
+            entityId: `${id}:${toothNumber}`,
+            patientId: id,
+            action: 'dental_chart.single_update',
+            beforeData: beforeSnapshot,
+            afterData: afterSnapshot,
+            metadata: { tooth_number: parseInt(toothNumber) },
+        });
         res.json(result.rows[0]);
     } catch (err) {
-        console.error(err);
+        logger.error('Failed to save single tooth status', err, {
+            patientId: req.params.id,
+            toothNumber,
+        });
         if (err.code === '23514') {
             return res.status(400).json({ error: 'The selected tooth status is not supported yet. Please refresh and try again.' });
         }
@@ -190,10 +220,20 @@ router.post('/extra', verifyToken, async (req, res) => {
             VALUES ($1, $2, 'healthy', true, $3, $4, NOW())
             RETURNING *
         `, [id, nextNum, extra_label.trim(), req.admin.id]);
+        await logAudit(pool, {
+            actorAdminId: req.admin.id,
+            actorRole: req.admin.role,
+            entityType: 'dental_chart',
+            entityId: `${id}:${nextNum}`,
+            patientId: id,
+            action: 'dental_chart.extra_add',
+            afterData: [result.rows[0]],
+            metadata: { tooth_number: nextNum, is_extra: true },
+        });
 
         res.status(201).json(result.rows[0]);
     } catch (err) {
-        console.error(err);
+        logger.error('Failed to add extra tooth', err, { patientId: req.params.id });
         res.status(500).json({ error: 'Server error' });
     }
 });
@@ -208,14 +248,28 @@ router.delete('/:toothNumber', verifyToken, async (req, res) => {
     }
 
     try {
+        const beforeSnapshot = await getDentalChartSnapshot(pool, id, [num]);
         const result = await pool.query(
             'DELETE FROM dental_chart WHERE patient_id = $1 AND tooth_number = $2 AND is_extra = true RETURNING id',
             [id, num]
         );
         if (result.rowCount === 0) return res.status(404).json({ error: 'Extra tooth not found' });
+        await logAudit(pool, {
+            actorAdminId: req.admin.id,
+            actorRole: req.admin.role,
+            entityType: 'dental_chart',
+            entityId: `${id}:${num}`,
+            patientId: id,
+            action: 'dental_chart.extra_delete',
+            beforeData: beforeSnapshot,
+            metadata: { tooth_number: num, is_extra: true },
+        });
         res.json({ message: 'Extra tooth removed' });
     } catch (err) {
-        console.error(err);
+        logger.error('Failed to delete extra tooth', err, {
+            patientId: req.params.id,
+            toothNumber,
+        });
         res.status(500).json({ error: 'Server error' });
     }
 });

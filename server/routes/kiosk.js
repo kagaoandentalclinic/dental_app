@@ -47,11 +47,19 @@ router.post('/:token', async (req, res) => {
 
         const existingPatientId = await findExistingPatientId(pool, sections.patient);
         if (existingPatientId) {
-            await updatePatientSections(pool, existingPatientId, sections, null);
+            await updatePatientSections(pool, existingPatientId, sections, null, {
+                adminId: null,
+                role: 'public',
+                source: 'kiosk',
+            });
             return res.json({ updated: true, patientName: sections.patient.first_name });
         }
 
-        await createPatientWithSections(pool, sections, null);
+        await createPatientWithSections(pool, sections, null, {
+            adminId: null,
+            role: 'public',
+            source: 'kiosk',
+        });
         res.status(201).json({ updated: false, patientName: sections.patient.first_name });
     } catch (err) {
         console.error(err);

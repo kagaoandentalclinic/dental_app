@@ -32,16 +32,14 @@ export default function Sidebar({ open, onClose }) {
             </AnimatePresence>
 
             {/* Sidebar panel — original dark teal gradient */}
-            <motion.aside
+            <aside
                 className={`
                     fixed inset-y-0 left-0 z-40 w-64 flex flex-col
                     bg-gradient-to-b from-primary-dark via-primary to-primary-light
-                    lg:static lg:z-auto lg:translate-x-0
+                    lg:static lg:z-auto transition-transform duration-300 ease-in-out
+                    lg:translate-x-0 ${open ? 'translate-x-0' : '-translate-x-full'}
                 `}
                 style={{ boxShadow: '4px 0 24px rgba(10,74,64,0.20)' }}
-                initial={false}
-                animate={{ x: open ? 0 : '-100%' }}
-                transition={{ type: 'spring', damping: 28, stiffness: 280 }}
             >
                 {/* Logo area */}
                 <div className="flex items-center justify-between px-5 py-5 border-b border-white/10">
@@ -52,7 +50,8 @@ export default function Sidebar({ open, onClose }) {
                     />
                     <button
                         onClick={onClose}
-                        className="lg:hidden text-white/70 hover:text-white transition-colors"
+                        aria-label="Close menu"
+                        className="lg:hidden text-white/70 hover:text-white transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg"
                     >
                         <X className="w-5 h-5" />
                     </button>
@@ -111,7 +110,7 @@ export default function Sidebar({ open, onClose }) {
                         <span>Sign Out</span>
                     </button>
                 </div>
-            </motion.aside>
+            </aside>
         </>
     );
 }

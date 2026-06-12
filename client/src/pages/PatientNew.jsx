@@ -105,7 +105,7 @@ export default function PatientNew() {
 
     return (
         <form onSubmit={handleSubmit} className="space-y-5 animate-fade-up">
-            <div className="flex items-center justify-between gap-4 flex-wrap">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                 <div className="flex items-center gap-3">
                     <BackButton to="/patients" />
                     <div>
@@ -114,7 +114,7 @@ export default function PatientNew() {
                     </div>
                 </div>
                 {step === STEPS.length - 1 && (
-                    <button type="submit" className="btn-primary" disabled={saving}>
+                    <button type="submit" className="btn-primary w-full sm:w-auto" disabled={saving}>
                         {saving ? 'Saving...' : <><Save className="w-4 h-4" /> Save Patient</>}
                     </button>
                 )}

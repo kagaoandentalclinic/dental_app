@@ -14,7 +14,7 @@ export default function Login() {
     const navigate = useNavigate();
 
     useEffect(() => {
-        if (admin) navigate('/dashboard', { replace: true });
+        if (admin) navigate('/admin/dashboard', { replace: true });
     }, [admin, navigate]);
 
     const handleSubmit = async (e) => {
@@ -23,7 +23,7 @@ export default function Login() {
         setLoading(true); setError('');
         try {
             await login(form.username, form.password);
-            navigate('/dashboard', { replace: true });
+            navigate('/admin/dashboard', { replace: true });
         } catch (err) {
             setError(err.response?.data?.error || 'Login failed. Please check your credentials.');
         } finally {

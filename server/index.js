@@ -2,31 +2,34 @@ require('dotenv').config({ path: require('path').resolve(__dirname, '../.env') }
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
-const app = express();
-app.set('trust proxy', 1); // Required for correct IP detection behind Railway's proxy
+const logger = require('./utils/logger');
+const { getJwtSecret } = require('./utils/jwt');
 
-// ─── Middleware ───────────────────────────────────
+const app = express();
+app.set('trust proxy', 1);
+
 app.use(helmet({ contentSecurityPolicy: false }));
+
 const allowedOrigins = [
     'http://localhost:5173',
     'http://localhost:5174',
     process.env.CLIENT_URL,
-].filter(Boolean).map(o => o.replace(/\/$/, ''));
+].filter(Boolean).map(origin => origin.replace(/\/$/, ''));
 
 app.use(cors({
     origin: (origin, callback) => {
         if (!origin || allowedOrigins.includes(origin.replace(/\/$/, ''))) {
             callback(null, true);
-        } else {
-            callback(new Error('Not allowed by CORS'));
+            return;
         }
+        callback(new Error('Not allowed by CORS'));
     },
     credentials: true,
 }));
+
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-// ─── Routes ──────────────────────────────────────
 const authRoutes = require('./routes/auth');
 const patientRoutes = require('./routes/patients');
 const dentalChartRoutes = require('./routes/dentalChart');
@@ -40,6 +43,8 @@ const appointmentsRoutes = require('./routes/appointments');
 const intakeRoutes = require('./routes/intake');
 const appointmentFormRoutes = require('./routes/appointmentForm');
 const kioskRoutes = require('./routes/kiosk');
+const portalRoutes = require('./routes/portal');
+const visitsRouter = require('./routes/visits');
 
 app.use('/api/auth', authRoutes);
 app.use('/api/patients', patientRoutes);
@@ -48,8 +53,6 @@ app.use('/api/patients/:id/visits', visitsRoutes);
 app.use('/api/patients/:id/medical-history', medicalHistoryRoutes);
 app.use('/api/patients/:id/orthodontics', orthodonticsRoutes);
 app.use('/api/patients/:id/photos', photosRoutes);
-// Standalone visit update/delete
-const visitsRouter = require('./routes/visits');
 app.use('/api/visits', visitsRouter);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/settings', settingsRoutes);
@@ -57,18 +60,31 @@ app.use('/api/appointments', appointmentsRoutes);
 app.use('/api/intake', intakeRoutes);
 app.use('/api/appointment-form', appointmentFormRoutes);
 app.use('/api/kiosk', kioskRoutes);
+app.use('/api/portal', portalRoutes);
 
-// ─── Health check ─────────────────────────────────
 app.get('/api/health', (req, res) => res.json({ status: 'ok', version: '1.0.0' }));
 
-// ─── Global error handler ─────────────────────────
 app.use((err, req, res, next) => {
-    console.error(err.stack);
+    logger.error('Unhandled Express error', err, {
+        method: req.method,
+        path: req.originalUrl,
+    });
     res.status(500).json({ error: err.message || 'Internal server error' });
 });
 
-// ─── Start ────────────────────────────────────────
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => {
-    console.log(`🦷 Dental Clinic API running on http://localhost:${PORT}`);
-});
+
+if (require.main === module) {
+    try {
+        getJwtSecret();
+    } catch (err) {
+        logger.error('Server startup blocked by invalid JWT configuration', err);
+        process.exit(1);
+    }
+
+    app.listen(PORT, () => {
+        logger.info(`Dental Clinic API running on http://localhost:${PORT}`);
+    });
+}
+
+module.exports = app;

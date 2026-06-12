@@ -45,6 +45,15 @@ CREATE TABLE IF NOT EXISTS patients (
   insurance_id VARCHAR(50),
   notes TEXT,
   profile_photo TEXT,
+  portal_registered BOOLEAN DEFAULT false,
+  portal_email VARCHAR(255),
+  portal_password_hash VARCHAR(255),
+  portal_email_verified BOOLEAN DEFAULT false,
+  portal_email_verification_token_hash VARCHAR(255),
+  portal_email_verification_sent_at TIMESTAMPTZ,
+  portal_google_sub VARCHAR(255),
+  portal_registered_at TIMESTAMPTZ,
+  portal_last_login TIMESTAMPTZ,
   is_active BOOLEAN DEFAULT true,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW(),
@@ -53,7 +62,29 @@ CREATE TABLE IF NOT EXISTS patients (
 
 -- Add profile_photo to existing patients tables (safe to run multiple times)
 ALTER TABLE patients ADD COLUMN IF NOT EXISTS profile_photo TEXT;
+ALTER TABLE patients ADD COLUMN IF NOT EXISTS portal_registered BOOLEAN DEFAULT false;
+ALTER TABLE patients ADD COLUMN IF NOT EXISTS portal_email VARCHAR(255);
+ALTER TABLE patients ADD COLUMN IF NOT EXISTS portal_password_hash VARCHAR(255);
+ALTER TABLE patients ADD COLUMN IF NOT EXISTS portal_email_verified BOOLEAN DEFAULT false;
+ALTER TABLE patients ADD COLUMN IF NOT EXISTS portal_email_verification_token_hash VARCHAR(255);
+ALTER TABLE patients ADD COLUMN IF NOT EXISTS portal_email_verification_sent_at TIMESTAMPTZ;
+ALTER TABLE patients ADD COLUMN IF NOT EXISTS portal_google_sub VARCHAR(255);
+ALTER TABLE patients ADD COLUMN IF NOT EXISTS portal_registered_at TIMESTAMPTZ;
+ALTER TABLE patients ADD COLUMN IF NOT EXISTS portal_last_login TIMESTAMPTZ;
 ALTER TABLE patients ALTER COLUMN date_of_birth DROP NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_patients_portal_email_unique
+  ON patients (LOWER(portal_email))
+  WHERE portal_email IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_patients_portal_google_sub_unique
+  ON patients (portal_google_sub)
+  WHERE portal_google_sub IS NOT NULL;
+UPDATE patients
+SET portal_email_verified = true
+WHERE portal_registered = true
+  AND portal_password_hash IS NOT NULL
+  AND portal_email IS NOT NULL
+  AND COALESCE(portal_email_verified, false) = false
+  AND portal_email_verification_sent_at IS NULL;
 
 -- ============================================
 -- PATIENT CONTACTS
@@ -64,10 +95,14 @@ CREATE TABLE IF NOT EXISTS patient_contacts (
   zip_code VARCHAR(10),
   phone VARCHAR(20),
   email VARCHAR(255),
+  emergency_contact_name VARCHAR(100),
+  emergency_contact_phone VARCHAR(20),
   business_address TEXT,
   business_phone VARCHAR(20),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+ALTER TABLE patient_contacts ADD COLUMN IF NOT EXISTS emergency_contact_name VARCHAR(100);
+ALTER TABLE patient_contacts ADD COLUMN IF NOT EXISTS emergency_contact_phone VARCHAR(20);
 
 -- ============================================
 -- PATIENT PROFILE DETAILS
@@ -301,10 +336,12 @@ CREATE TABLE IF NOT EXISTS appointments (
   duration_minutes INTEGER DEFAULT 60 CHECK (duration_minutes > 0),
   appointment_type VARCHAR(50) NOT NULL DEFAULT 'checkup',
   status VARCHAR(20) DEFAULT 'scheduled' CHECK (status IN ('scheduled', 'completed', 'cancelled', 'no_show')),
+  source VARCHAR(20) DEFAULT 'admin' CHECK (source IN ('admin', 'patient_portal')),
   notes TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   created_by UUID REFERENCES admins(id)
 );
+ALTER TABLE appointments ADD COLUMN IF NOT EXISTS source VARCHAR(20) DEFAULT 'admin';
 
 -- ============================================
 -- INDEXES
@@ -339,6 +376,13 @@ BEGIN
         CHECK (status IN ('pending', 'scheduled', 'completed', 'cancelled', 'no_show'));
 EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
+DO $$
+BEGIN
+    ALTER TABLE appointments DROP CONSTRAINT IF EXISTS appointments_source_check;
+    ALTER TABLE appointments ADD CONSTRAINT appointments_source_check
+        CHECK (source IN ('admin', 'patient_portal'));
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
 
 -- ============================================
 -- INTAKE SUBMISSIONS
@@ -352,6 +396,27 @@ CREATE TABLE IF NOT EXISTS intake_submissions (
 );
 
 CREATE INDEX IF NOT EXISTS idx_intake_submissions_patient ON intake_submissions(patient_id);
+
+-- ============================================
+-- AUDIT LOGS
+-- ============================================
+CREATE TABLE IF NOT EXISTS audit_logs (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  actor_admin_id UUID REFERENCES admins(id) ON DELETE SET NULL,
+  actor_role VARCHAR(50),
+  entity_type VARCHAR(100) NOT NULL,
+  entity_id VARCHAR(100) NOT NULL,
+  patient_id UUID REFERENCES patients(id) ON DELETE SET NULL,
+  action VARCHAR(120) NOT NULL,
+  before_data JSONB,
+  after_data JSONB,
+  metadata JSONB,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_patient ON audit_logs(patient_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_entity ON audit_logs(entity_type, entity_id, created_at DESC);
 
 -- ============================================
 -- CLINIC KIOSK

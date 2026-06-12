@@ -3,7 +3,7 @@ import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion';
 import { Pencil, Trash2, Phone, Mail, Heart, Stethoscope, Calendar, ClipboardList, Smile, Camera, ZoomIn, ZoomOut, X } from 'lucide-react';
 import client from '../api/client';
-import { formatName, calcAge, formatDate, getInitials } from '../utils/helpers';
+import { formatName, calcAge, formatDate } from '../utils/helpers';
 import BackButton from '../components/BackButton';
 import { useToast } from '../components/Toast';
 import ConfirmDialog from '../components/ConfirmDialog';
@@ -100,11 +100,7 @@ export default function PatientDetail() {
                                 <ZoomIn className="w-5 h-5 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
                             </span>
                         </button>
-                    ) : (
-                        <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-primary to-primary-light flex items-center justify-center text-white font-bold text-xl shrink-0 shadow-md">
-                            {getInitials(formatName(patient))}
-                        </div>
-                    )}
+                    ) : null}
 
                     {/* Info */}
                     <div className="flex-1 min-w-0">

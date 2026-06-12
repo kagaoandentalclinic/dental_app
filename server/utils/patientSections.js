@@ -1,4 +1,6 @@
 const schema = require('./patient-form-schema.json');
+const { getDentalIssueSql } = require('./dentalChart');
+const { logAudit } = require('./auditLogs');
 
 const SECTION_FIELDS = schema.sections;
 
@@ -213,15 +215,28 @@ async function updatePatientCore(client, patientId, patient = {}) {
     return result.rows[0] || null;
 }
 
-async function updateCoreSection(pool, patientId, patient) {
+async function updateCoreSection(pool, patientId, patient, auditActor = null) {
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
+        const beforeDetail = await getPatientDetail(client, patientId);
         const updated = await updatePatientCore(client, patientId, patient);
         if (!updated) {
             await client.query('ROLLBACK');
             return false;
         }
+        const afterDetail = await getPatientDetail(client, patientId);
+        await logAudit(client, {
+            actorAdminId: auditActor?.adminId || null,
+            actorRole: auditActor?.role || null,
+            entityType: 'patient',
+            entityId: patientId,
+            patientId,
+            action: 'patient.core_update',
+            beforeData: beforeDetail,
+            afterData: afterDetail,
+            metadata: auditActor?.source ? { source: auditActor.source } : { section: 'core' },
+        });
         await client.query('COMMIT');
         return true;
     } catch (err) {
@@ -232,7 +247,7 @@ async function updateCoreSection(pool, patientId, patient) {
     }
 }
 
-async function createPatientWithSections(pool, sections, createdBy = null) {
+async function createPatientWithSections(pool, sections, createdBy = null, auditActor = null) {
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
@@ -241,6 +256,17 @@ async function createPatientWithSections(pool, sections, createdBy = null) {
         await upsertProfile(client, inserted.id, sections.profile);
         await upsertInsurance(client, inserted.id, sections.insurance);
         await upsertMedicalSnapshot(client, inserted.id, sections.medical, createdBy);
+        const afterDetail = await getPatientDetail(client, inserted.id);
+        await logAudit(client, {
+            actorAdminId: auditActor?.adminId || null,
+            actorRole: auditActor?.role || (createdBy ? 'admin' : 'public'),
+            entityType: 'patient',
+            entityId: inserted.id,
+            patientId: inserted.id,
+            action: 'patient.create',
+            afterData: afterDetail,
+            metadata: auditActor?.source ? { source: auditActor.source } : null,
+        });
         await client.query('COMMIT');
         return inserted;
     } catch (err) {
@@ -251,10 +277,11 @@ async function createPatientWithSections(pool, sections, createdBy = null) {
     }
 }
 
-async function updatePatientSections(pool, patientId, sections, updatedBy = null) {
+async function updatePatientSections(pool, patientId, sections, updatedBy = null, auditActor = null) {
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
+        const beforeDetail = await getPatientDetail(client, patientId);
         const updated = await updatePatientCore(client, patientId, sections.patient);
         if (!updated) {
             await client.query('ROLLBACK');
@@ -264,6 +291,18 @@ async function updatePatientSections(pool, patientId, sections, updatedBy = null
         await upsertProfile(client, patientId, sections.profile);
         await upsertInsurance(client, patientId, sections.insurance);
         await upsertMedicalSnapshot(client, patientId, sections.medical, updatedBy);
+        const afterDetail = await getPatientDetail(client, patientId);
+        await logAudit(client, {
+            actorAdminId: auditActor?.adminId || null,
+            actorRole: auditActor?.role || (updatedBy ? 'admin' : 'public'),
+            entityType: 'patient',
+            entityId: patientId,
+            patientId,
+            action: 'patient.update',
+            beforeData: beforeDetail,
+            afterData: afterDetail,
+            metadata: auditActor?.source ? { source: auditActor.source } : null,
+        });
         await client.query('COMMIT');
         return updated;
     } catch (err) {
@@ -274,7 +313,7 @@ async function updatePatientSections(pool, patientId, sections, updatedBy = null
     }
 }
 
-async function updateContactSection(pool, patientId, contact) {
+async function updateContactSection(pool, patientId, contact, auditActor = null) {
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
@@ -283,8 +322,21 @@ async function updateContactSection(pool, patientId, contact) {
             await client.query('ROLLBACK');
             return false;
         }
+        const beforeDetail = await getPatientDetail(client, patientId);
         await upsertContact(client, patientId, contact);
         await client.query('UPDATE patients SET updated_at = NOW() WHERE id = $1', [patientId]);
+        const afterDetail = await getPatientDetail(client, patientId);
+        await logAudit(client, {
+            actorAdminId: auditActor?.adminId || null,
+            actorRole: auditActor?.role || null,
+            entityType: 'patient',
+            entityId: patientId,
+            patientId,
+            action: 'patient.contact_update',
+            beforeData: beforeDetail,
+            afterData: afterDetail,
+            metadata: auditActor?.source ? { source: auditActor.source } : { section: 'contact' },
+        });
         await client.query('COMMIT');
         return true;
     } catch (err) {
@@ -295,7 +347,7 @@ async function updateContactSection(pool, patientId, contact) {
     }
 }
 
-async function updateProfileSection(pool, patientId, profile) {
+async function updateProfileSection(pool, patientId, profile, auditActor = null) {
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
@@ -304,8 +356,21 @@ async function updateProfileSection(pool, patientId, profile) {
             await client.query('ROLLBACK');
             return false;
         }
+        const beforeDetail = await getPatientDetail(client, patientId);
         await upsertProfile(client, patientId, profile);
         await client.query('UPDATE patients SET updated_at = NOW() WHERE id = $1', [patientId]);
+        const afterDetail = await getPatientDetail(client, patientId);
+        await logAudit(client, {
+            actorAdminId: auditActor?.adminId || null,
+            actorRole: auditActor?.role || null,
+            entityType: 'patient',
+            entityId: patientId,
+            patientId,
+            action: 'patient.profile_update',
+            beforeData: beforeDetail,
+            afterData: afterDetail,
+            metadata: auditActor?.source ? { source: auditActor.source } : { section: 'profile' },
+        });
         await client.query('COMMIT');
         return true;
     } catch (err) {
@@ -316,7 +381,7 @@ async function updateProfileSection(pool, patientId, profile) {
     }
 }
 
-async function updateInsuranceSection(pool, patientId, insurance) {
+async function updateInsuranceSection(pool, patientId, insurance, auditActor = null) {
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
@@ -325,8 +390,21 @@ async function updateInsuranceSection(pool, patientId, insurance) {
             await client.query('ROLLBACK');
             return false;
         }
+        const beforeDetail = await getPatientDetail(client, patientId);
         await upsertInsurance(client, patientId, insurance);
         await client.query('UPDATE patients SET updated_at = NOW() WHERE id = $1', [patientId]);
+        const afterDetail = await getPatientDetail(client, patientId);
+        await logAudit(client, {
+            actorAdminId: auditActor?.adminId || null,
+            actorRole: auditActor?.role || null,
+            entityType: 'patient',
+            entityId: patientId,
+            patientId,
+            action: 'patient.insurance_update',
+            beforeData: beforeDetail,
+            afterData: afterDetail,
+            metadata: auditActor?.source ? { source: auditActor.source } : { section: 'insurance' },
+        });
         await client.query('COMMIT');
         return true;
     } catch (err) {
@@ -367,7 +445,7 @@ async function getPatientDetail(pool, patientId) {
             CASE WHEN pi.patient_id IS NOT NULL THEN pi.insurance_id ELSE p.insurance_id END AS insurance_id,
             CASE WHEN mh.patient_id IS NOT NULL THEN mh.height ELSE p.height END AS height,
             CASE WHEN mh.patient_id IS NOT NULL THEN mh.weight ELSE p.weight END AS weight,
-            (SELECT COUNT(*) FROM dental_chart dc WHERE dc.patient_id = p.id AND dc.status IN ('cavity', 'root_fragment')) AS dental_issues,
+            (SELECT COUNT(*) FROM dental_chart dc WHERE dc.patient_id = p.id AND ${getDentalIssueSql('dc')}) AS dental_issues,
             (SELECT COUNT(*) FROM visits v WHERE v.patient_id = p.id) AS total_visits,
             (SELECT MAX(v.visit_date) FROM visits v WHERE v.patient_id = p.id) AS last_visit
          FROM patients p

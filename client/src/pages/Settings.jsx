@@ -45,7 +45,7 @@ function SectionTitle({ children }) {
 
 function SaveButton({ loading, label = 'Save Changes' }) {
     return (
-        <button type="submit" disabled={loading} className="btn-primary">
+        <button type="submit" disabled={loading} className="btn-primary w-full sm:w-auto">
             <Save className="w-4 h-4" />
             {loading ? 'Saving…' : label}
         </button>
@@ -605,14 +605,15 @@ function UsersTab() {
                 </div>
 
                 <div className="overflow-x-auto">
-                    <table className="w-full min-w-[720px] text-sm">
+                    <table className="w-full min-w-0 text-sm">
                         <thead className="bg-bg/80 border-b border-border">
                             <tr>
-                                {['Name', 'Username', 'Role', 'Status', 'Last Login', ...(isAdmin ? ['Actions'] : [])].map(h => (
-                                    <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-text-secondary uppercase tracking-wide whitespace-nowrap">
-                                        {h}
-                                    </th>
-                                ))}
+                                <th className="px-4 py-3 text-left text-xs font-semibold text-text-secondary uppercase tracking-wide whitespace-nowrap">Name</th>
+                                <th className="hidden sm:table-cell px-4 py-3 text-left text-xs font-semibold text-text-secondary uppercase tracking-wide whitespace-nowrap">Username</th>
+                                <th className="px-4 py-3 text-left text-xs font-semibold text-text-secondary uppercase tracking-wide whitespace-nowrap">Role</th>
+                                <th className="px-4 py-3 text-left text-xs font-semibold text-text-secondary uppercase tracking-wide whitespace-nowrap">Status</th>
+                                <th className="hidden sm:table-cell px-4 py-3 text-left text-xs font-semibold text-text-secondary uppercase tracking-wide whitespace-nowrap">Last Login</th>
+                                {isAdmin && <th className="px-4 py-3 text-left text-xs font-semibold text-text-secondary uppercase tracking-wide whitespace-nowrap">Actions</th>}
                             </tr>
                         </thead>
                         <tbody>
@@ -639,7 +640,7 @@ function UsersTab() {
                                             )}
                                         </div>
                                     </td>
-                                    <td className="px-4 py-3.5 text-text-secondary">{u.username}</td>
+                                    <td className="hidden sm:table-cell px-4 py-3.5 text-text-secondary">{u.username}</td>
                                     <td className="px-4 py-3.5">
                                         <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${roleBadgeColor[u.role] || 'bg-gray-100 text-gray-700'}`}>
                                             {u.role}
@@ -650,7 +651,7 @@ function UsersTab() {
                                             {u.is_active ? 'Active' : 'Inactive'}
                                         </span>
                                     </td>
-                                    <td className="px-4 py-3.5 text-text-secondary">
+                                    <td className="hidden sm:table-cell px-4 py-3.5 text-text-secondary">
                                         {u.last_login ? formatDate(u.last_login) : 'Never'}
                                     </td>
                                     {isAdmin && (
@@ -771,7 +772,7 @@ function FormSettingsCard({
 
                 {formUrl && enabled && (
                     <div className="flex flex-col sm:flex-row items-center gap-5 pt-4 border-t border-border">
-                        <div className="p-3 bg-white border border-border rounded-xl shadow-sm shrink-0">
+                        <div className="p-3 bg-white border border-border rounded-xl shadow-sm shrink-0 mx-auto sm:mx-0">
                             <QRCodeSVG
                                 className="qr-download-target"
                                 value={formUrl}
@@ -780,14 +781,14 @@ function FormSettingsCard({
                                 bgColor="#ffffff"
                             />
                         </div>
-                        <div className="flex-1 space-y-2">
+                        <div className="flex-1 space-y-2 w-full">
                             <p className="text-sm font-medium text-text-primary">QR Code</p>
                             <p className="text-xs text-text-secondary">
                                 Print or display this QR code at the front desk. Patients scan it with their phone camera to open the registration form on their own device — no URL needed.
                             </p>
                             <button
                                 type="button"
-                                className="btn-secondary text-xs gap-1.5"
+                                className="btn-secondary text-xs gap-1.5 w-full sm:w-auto"
                                 onClick={() => {
                                     const svg = document.querySelector('.qr-download-target');
                                     if (!svg) return;

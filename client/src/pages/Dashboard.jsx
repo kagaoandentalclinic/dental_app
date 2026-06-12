@@ -250,28 +250,28 @@ export default function Dashboard() {
                     </p>
                 </div>
                 {/* Quick action buttons — like in the reference */}
-                <div className="flex items-center gap-2 shrink-0">
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto shrink-0">
                     <Link
                         to="/appointments"
-                        className="btn-secondary text-sm py-2 px-4"
+                        className="btn-secondary text-sm py-2 px-4 w-full sm:w-auto"
                     >
                         <Calendar className="w-4 h-4" />
                         <span className="hidden sm:inline">Make Appointment</span>
-                        <span className="sm:hidden">Appt.</span>
+                        <span className="sm:hidden">Make Appointment</span>
                     </Link>
                     <Link
                         to="/patients/new"
-                        className="btn-primary text-sm py-2 px-4"
+                        className="btn-primary text-sm py-2 px-4 w-full sm:w-auto"
                     >
                         <Plus className="w-4 h-4" />
                         <span className="hidden sm:inline">Add Patient</span>
-                        <span className="sm:hidden">Add</span>
+                        <span className="sm:hidden">Add Patient</span>
                     </Link>
                 </div>
             </div>
 
             {/* ── Stat Cards ── */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 {STAT_CARDS.map((cfg, i) => (
                     <StatCard
                         key={cfg.key}
@@ -320,12 +320,14 @@ export default function Dashboard() {
                     </div>
 
                     <div className="overflow-x-auto">
-                        <table className="data-table min-w-[620px]">
+                        <table className="data-table w-full">
                             <thead>
                                 <tr>
-                                    {['Patient', 'Age', 'Last Visit', 'Status', ''].map(h => (
-                                        <th key={h}>{h}</th>
-                                    ))}
+                                    <th>Patient</th>
+                                    <th className="hidden sm:table-cell">Age</th>
+                                    <th className="hidden sm:table-cell">Last Visit</th>
+                                    <th>Status</th>
+                                    <th></th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -344,8 +346,8 @@ export default function Dashboard() {
                                                     </div>
                                                 </div>
                                             </td>
-                                            <td className="text-slate-500">{calcAge(p.date_of_birth)} yrs</td>
-                                            <td className="text-slate-500 text-sm">
+                                            <td className="hidden sm:table-cell text-slate-500">{calcAge(p.date_of_birth)} yrs</td>
+                                            <td className="hidden sm:table-cell text-slate-500 text-sm">
                                                 {p.last_visit ? formatDate(p.last_visit) : (
                                                     <span className="text-slate-300 italic">No visits</span>
                                                 )}
@@ -401,12 +403,14 @@ export default function Dashboard() {
                     </div>
 
                     <div className="overflow-x-auto">
-                        <table className="data-table min-w-[580px]">
+                        <table className="data-table w-full">
                             <thead>
                                 <tr>
-                                    {['Patient', 'Unpaid Visits', 'Amount Owed', 'Last Visit', ''].map(h => (
-                                        <th key={h}>{h}</th>
-                                    ))}
+                                    <th>Patient</th>
+                                    <th className="hidden sm:table-cell">Unpaid Visits</th>
+                                    <th>Amount Owed</th>
+                                    <th className="hidden sm:table-cell">Last Visit</th>
+                                    <th></th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -423,7 +427,7 @@ export default function Dashboard() {
                                                     </span>
                                                 </div>
                                             </td>
-                                            <td>
+                                            <td className="hidden sm:table-cell">
                                                 <span className="badge-amber">
                                                     {parseInt(p.pending_visits)} visit{parseInt(p.pending_visits) !== 1 ? 's' : ''}
                                                 </span>
@@ -433,7 +437,7 @@ export default function Dashboard() {
                                                     {formatCurrency(parseFloat(p.outstanding_amount))}
                                                 </span>
                                             </td>
-                                            <td className="text-slate-500 text-sm">
+                                            <td className="hidden sm:table-cell text-slate-500 text-sm">
                                                 {p.last_visit ? formatDate(p.last_visit) : '—'}
                                             </td>
                                             <td>

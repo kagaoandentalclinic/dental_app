@@ -4,17 +4,11 @@ const { body, validationResult } = require('express-validator');
 const router = express.Router();
 const pool = require('../db/pool');
 const { verifyToken } = require('../middleware/auth');
+const { requirePermission } = require('../middleware/permissions');
+const { PERMISSIONS, getRolePermissions } = require('../utils/permissions');
 
 // All routes require authentication
 router.use(verifyToken);
-
-// Middleware: admin-only
-function requireAdmin(req, res, next) {
-    if (req.admin.role !== 'admin') {
-        return res.status(403).json({ error: 'Admin role required' });
-    }
-    next();
-}
 
 const BACKUP_TABLES = [
     { name: 'clinic_settings', orderBy: 'id ASC' },
@@ -31,6 +25,7 @@ const BACKUP_TABLES = [
     { name: 'patient_photos', orderBy: 'uploaded_at ASC, id ASC' },
     { name: 'appointments', orderBy: 'appointment_date ASC, id ASC' },
     { name: 'intake_submissions', orderBy: 'submitted_at ASC, id ASC' },
+    { name: 'audit_logs', orderBy: 'created_at ASC, id ASC' },
 ];
 
 const BACKUP_TABLE_NAMES = BACKUP_TABLES.map(table => table.name);
@@ -97,6 +92,14 @@ router.get('/profile', async (req, res) => {
         console.error(err);
         res.status(500).json({ error: 'Server error' });
     }
+});
+
+// GET /api/settings/permissions
+router.get('/permissions', (req, res) => {
+    res.json({
+        role: req.admin.role,
+        permissions: getRolePermissions(req.admin.role),
+    });
 });
 
 // POST /api/settings/profile/photo
@@ -192,6 +195,7 @@ router.get('/clinic', async (req, res) => {
 
 // PUT /api/settings/clinic
 router.put('/clinic',
+    requirePermission(PERMISSIONS.MANAGE_CLINIC_SETTINGS),
     body('clinic_name').trim().notEmpty().withMessage('Clinic name is required'),
     body('email').optional({ checkFalsy: true }).isEmail().normalizeEmail(),
     async (req, res) => {
@@ -228,7 +232,7 @@ router.put('/clinic',
 // ─── User Management ──────────────────────────────────────────────────────────
 
 // GET /api/settings/users (admin-only)
-router.get('/users', requireAdmin, async (req, res) => {
+router.get('/users', requirePermission(PERMISSIONS.MANAGE_STAFF), async (req, res) => {
     try {
         const result = await pool.query(
             `SELECT id, username, email, full_name, role, is_active, created_at, last_login
@@ -242,7 +246,7 @@ router.get('/users', requireAdmin, async (req, res) => {
 });
 
 // POST /api/settings/users (admin-only)
-router.post('/users', requireAdmin,
+router.post('/users', requirePermission(PERMISSIONS.MANAGE_STAFF),
     body('full_name').trim().notEmpty().withMessage('Full name is required'),
     body('username').trim().isLength({ min: 3 }).withMessage('Username must be at least 3 characters'),
     body('email').isEmail().normalizeEmail().withMessage('Valid email is required'),
@@ -278,7 +282,7 @@ router.post('/users', requireAdmin,
 );
 
 // PUT /api/settings/users/:id (admin-only)
-router.put('/users/:id', requireAdmin,
+router.put('/users/:id', requirePermission(PERMISSIONS.MANAGE_STAFF),
     body('full_name').trim().notEmpty().withMessage('Full name is required'),
     body('email').isEmail().normalizeEmail().withMessage('Valid email is required'),
     body('role').isIn(['admin', 'dentist', 'hygienist', 'receptionist']).withMessage('Invalid role'),
@@ -335,7 +339,7 @@ router.put('/users/:id', requireAdmin,
 );
 
 // PATCH /api/settings/users/:id/status (admin-only)
-router.patch('/users/:id/status', requireAdmin, async (req, res) => {
+router.patch('/users/:id/status', requirePermission(PERMISSIONS.MANAGE_STAFF), async (req, res) => {
     const { id } = req.params;
     if (id === req.admin.id) {
         return res.status(400).json({ error: 'Cannot deactivate your own account' });
@@ -357,7 +361,7 @@ router.patch('/users/:id/status', requireAdmin, async (req, res) => {
 // ─── Intake Form Settings ─────────────────────────────────────────────────────
 
 // DELETE /api/settings/users/:id (admin-only)
-router.delete('/users/:id', requireAdmin, async (req, res) => {
+router.delete('/users/:id', requirePermission(PERMISSIONS.MANAGE_STAFF), async (req, res) => {
     const { id } = req.params;
     if (id === req.admin.id) {
         return res.status(400).json({ error: 'Cannot delete your own account' });
@@ -418,7 +422,7 @@ router.get('/intake', async (req, res) => {
 });
 
 // PUT /api/settings/intake
-router.put('/intake', async (req, res) => {
+router.put('/intake', requirePermission(PERMISSIONS.MANAGE_PUBLIC_FORMS), async (req, res) => {
     const { intake_enabled, intake_slug, intake_redirect_url } = req.body;
     if (!intake_slug || !/^[a-zA-Z0-9_-]{3,50}$/.test(intake_slug.trim())) {
         return res.status(400).json({ error: 'Slug must be 3–50 characters: letters, numbers, hyphens, underscores only' });
@@ -484,7 +488,7 @@ router.get('/appt-form', async (req, res) => {
 });
 
 // PUT /api/settings/appt-form
-router.put('/appt-form', async (req, res) => {
+router.put('/appt-form', requirePermission(PERMISSIONS.MANAGE_PUBLIC_FORMS), async (req, res) => {
     const { appt_form_enabled, appt_form_slug, appt_form_redirect_url } = req.body;
     if (!appt_form_slug || !/^[a-zA-Z0-9_-]{3,50}$/.test(appt_form_slug.trim())) {
         return res.status(400).json({ error: 'Slug must be 3–50 characters: letters, numbers, hyphens, underscores only' });
@@ -516,7 +520,7 @@ router.put('/appt-form', async (req, res) => {
 });
 
 // POST /api/settings/appt-form/regenerate
-router.post('/appt-form/regenerate', async (req, res) => {
+router.post('/appt-form/regenerate', requirePermission(PERMISSIONS.MANAGE_PUBLIC_FORMS), async (req, res) => {
     const slug = generateSlug();
     try {
         const existing = await pool.query('SELECT id FROM clinic_settings LIMIT 1');
@@ -535,7 +539,7 @@ router.post('/appt-form/regenerate', async (req, res) => {
 // ─── Clinic Kiosk ─────────────────────────────────────────────────────────────
 
 // GET /api/settings/kiosk (admin-only)
-router.get('/kiosk', requireAdmin, async (req, res) => {
+router.get('/kiosk', requirePermission(PERMISSIONS.MANAGE_KIOSK), async (req, res) => {
     try {
         // Ensure column exists — production DB may not have had schema.sql re-run
         await pool.query('ALTER TABLE clinic_settings ADD COLUMN IF NOT EXISTS kiosk_token VARCHAR(64)');
@@ -560,7 +564,7 @@ router.get('/kiosk', requireAdmin, async (req, res) => {
 });
 
 // POST /api/settings/kiosk/regenerate (admin-only)
-router.post('/kiosk/regenerate', requireAdmin, async (req, res) => {
+router.post('/kiosk/regenerate', requirePermission(PERMISSIONS.MANAGE_KIOSK), async (req, res) => {
     const token = generateSlug() + generateSlug() + generateSlug();
     try {
         const existing = await pool.query('SELECT id FROM clinic_settings LIMIT 1');
@@ -577,7 +581,7 @@ router.post('/kiosk/regenerate', requireAdmin, async (req, res) => {
 });
 
 // POST /api/settings/intake/regenerate
-router.post('/intake/regenerate', async (req, res) => {
+router.post('/intake/regenerate', requirePermission(PERMISSIONS.MANAGE_PUBLIC_FORMS), async (req, res) => {
     const slug = generateSlug();
     try {
         const existing = await pool.query('SELECT id FROM clinic_settings LIMIT 1');
@@ -600,7 +604,7 @@ router.post('/intake/regenerate', async (req, res) => {
 });
 
 // GET /api/settings/backup (admin-only)
-router.get('/backup', requireAdmin, async (req, res) => {
+router.get('/backup', requirePermission(PERMISSIONS.MANAGE_BACKUPS), async (req, res) => {
     const db = await pool.connect();
     try {
         const tables = {};
@@ -628,7 +632,7 @@ router.get('/backup', requireAdmin, async (req, res) => {
 });
 
 // POST /api/settings/backup/restore (admin-only)
-router.post('/backup/restore', requireAdmin, async (req, res) => {
+router.post('/backup/restore', requirePermission(PERMISSIONS.MANAGE_BACKUPS), async (req, res) => {
     const { backup } = req.body;
     if (!backup || typeof backup !== 'object' || backup.format !== 'kagaoan-dental-backup' || !backup.tables) {
         return res.status(400).json({ error: 'Invalid backup file' });
@@ -670,6 +674,40 @@ router.post('/backup/restore', requireAdmin, async (req, res) => {
         res.status(500).json({ error: 'Failed to restore backup' });
     } finally {
         db.release();
+    }
+});
+
+// GET /api/settings/audit-logs
+router.get('/audit-logs', requirePermission(PERMISSIONS.VIEW_AUDIT_LOGS), async (req, res) => {
+    const limit = Math.min(Math.max(parseInt(req.query.limit || '50', 10), 1), 200);
+    const values = [limit];
+    const filters = [];
+
+    if (req.query.patient_id) {
+        values.push(req.query.patient_id);
+        filters.push(`al.patient_id = $${values.length}`);
+    }
+    if (req.query.entity_type) {
+        values.push(req.query.entity_type);
+        filters.push(`al.entity_type = $${values.length}`);
+    }
+
+    const whereSql = filters.length > 0 ? `WHERE ${filters.join(' AND ')}` : '';
+
+    try {
+        const result = await pool.query(
+            `SELECT al.*, a.full_name AS actor_name
+             FROM audit_logs al
+             LEFT JOIN admins a ON a.id = al.actor_admin_id
+             ${whereSql}
+             ORDER BY al.created_at DESC
+             LIMIT $1`,
+            values
+        );
+        res.json(result.rows);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Failed to load audit logs' });
     }
 });
 

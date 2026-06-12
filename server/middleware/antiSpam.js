@@ -23,7 +23,7 @@ const DEVICE_LIMIT = 5;
 const DEVICE_WINDOW_MS = 60 * 60 * 1000;
 
 // Prune stale entries periodically to prevent memory growth
-setInterval(() => {
+const pruneTimer = setInterval(() => {
     const now = Date.now();
     for (const [key, ts] of recentSubmissions) {
         if (now - ts > COOLDOWN_MS) recentSubmissions.delete(key);
@@ -34,6 +34,7 @@ setInterval(() => {
         else deviceSubmissions.set(key, fresh);
     }
 }, 15 * 60 * 1000);
+pruneTimer.unref?.();
 
 // ── Middleware ────────────────────────────────────────────────────────────────
 

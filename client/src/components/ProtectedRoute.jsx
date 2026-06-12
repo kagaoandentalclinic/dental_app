@@ -9,6 +9,6 @@ export default function ProtectedRoute({ children }) {
         return <div className="min-h-screen flex items-center justify-center bg-bg"><LoadingSpinner size="lg" /></div>;
     }
 
-    if (!admin) return <Navigate to="/login" replace />;
+    if (!admin) return <Navigate to="/admin/login" replace />;
     return children;
 }

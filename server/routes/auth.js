@@ -1,10 +1,12 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
 const { body, validationResult } = require('express-validator');
 const router = express.Router();
 const pool = require('../db/pool');
 const { verifyToken } = require('../middleware/auth');
+const logger = require('../utils/logger');
+const { signAdminToken } = require('../utils/jwt');
+const { attachPermissions } = require('../utils/permissions');
 
 // Rate limiting store (simple in-memory)
 const loginAttempts = new Map();
@@ -52,24 +54,25 @@ router.post('/login',
             // Update last login
             await pool.query('UPDATE admins SET last_login = NOW() WHERE id = $1', [admin.id]);
 
-            const token = jwt.sign(
-                { id: admin.id, username: admin.username, role: admin.role, full_name: admin.full_name },
-                process.env.JWT_SECRET || 'dental_secret_key',
-                { expiresIn: '30d' }
-            );
+            const token = signAdminToken({
+                id: admin.id,
+                username: admin.username,
+                role: admin.role,
+                full_name: admin.full_name,
+            });
 
             res.json({
                 token,
-                admin: {
+                admin: attachPermissions({
                     id: admin.id,
                     username: admin.username,
                     email: admin.email,
                     full_name: admin.full_name,
                     role: admin.role,
-                }
+                }),
             });
         } catch (err) {
-            console.error(err);
+            logger.error('Login failed unexpectedly', err, { username: req.body.username, ip: req.ip });
             res.status(500).json({ error: 'Server error' });
         }
     }
@@ -83,8 +86,9 @@ router.get('/me', verifyToken, async (req, res) => {
             [req.admin.id]
         );
         if (result.rows.length === 0) return res.status(404).json({ error: 'Admin not found' });
-        res.json(result.rows[0]);
+        res.json(attachPermissions(result.rows[0]));
     } catch (err) {
+        logger.error('Failed to load current admin', err, { adminId: req.admin.id });
         res.status(500).json({ error: 'Server error' });
     }
 });
@@ -109,6 +113,7 @@ router.put('/change-password', verifyToken,
             await pool.query('UPDATE admins SET password_hash = $1 WHERE id = $2', [newHash, req.admin.id]);
             res.json({ message: 'Password changed successfully' });
         } catch (err) {
+            logger.error('Failed to change password', err, { adminId: req.admin.id });
             res.status(500).json({ error: 'Server error' });
         }
     }

@@ -55,6 +55,87 @@ function apptPosition(appt) {
     return { top, height };
 }
 
+// ── Mobile Agenda View ───────────────────────────────────
+function MobileAgendaView({ weekDays, appointments, onApptClick, onSlotClick, loading }) {
+    if (loading) {
+        return (
+            <div className="space-y-3">
+                {[1, 2, 3].map(i => (
+                    <div key={i} className="card p-4 space-y-2">
+                        <div className="skeleton h-4 rounded w-1/3" />
+                        <div className="skeleton h-10 rounded w-full" />
+                        <div className="skeleton h-10 rounded w-full" />
+                    </div>
+                ))}
+            </div>
+        );
+    }
+
+    return (
+        <div className="space-y-3">
+            {weekDays.map((day) => {
+                const dayAppts = appointments
+                    .filter(a => isSameDay(new Date(a.appointment_date), day))
+                    .sort((a, b) => new Date(a.appointment_date) - new Date(b.appointment_date));
+
+                return (
+                    <div key={day.toISOString()} className="card p-0 overflow-hidden">
+                        {/* Day header */}
+                        <div
+                            className={`px-4 py-2.5 border-b border-slate-100 flex items-center justify-between ${
+                                isToday(day) ? 'bg-primary/5' : 'bg-slate-50/60'
+                            }`}
+                        >
+                            <p className={`text-sm font-bold ${
+                                isToday(day) ? 'text-primary' : 'text-text-primary'
+                            }`}>
+                                {format(day, 'EEEE, MMM d')}
+                                {isToday(day) && <span className="ml-2 text-xs font-semibold bg-primary text-white px-2 py-0.5 rounded-full">Today</span>}
+                            </p>
+                            <button
+                                className="text-xs font-semibold text-primary flex items-center gap-1"
+                                onClick={() => onSlotClick(day, 9)}
+                            >
+                                <Plus className="w-3.5 h-3.5" /> Add
+                            </button>
+                        </div>
+
+                        {dayAppts.length === 0 ? (
+                            <p className="px-4 py-3 text-sm text-slate-400 italic">No appointments</p>
+                        ) : (
+                            <div className="divide-y divide-slate-100">
+                                {dayAppts.map(appt => {
+                                    const style = APPOINTMENT_STATUS_STYLES[appt.status] || APPOINTMENT_STATUS_STYLES.scheduled;
+                                    return (
+                                        <button
+                                            key={appt.id}
+                                            className="w-full text-left px-4 py-3 hover:bg-slate-50 transition-colors flex items-center gap-3"
+                                            onClick={() => onApptClick(appt)}
+                                        >
+                                            <div className={`w-1 self-stretch rounded-full ${style.dot}`} />
+                                            <div className="min-w-0 flex-1">
+                                                <p className="font-medium text-text-primary text-sm truncate">
+                                                    {appt.last_name}, {appt.first_name}
+                                                </p>
+                                                <p className="text-xs text-slate-400 mt-0.5">
+                                                    {format(new Date(appt.appointment_date), 'h:mm a')} · {capitalize(appt.appointment_type)} · {appt.duration_minutes} min
+                                                </p>
+                                            </div>
+                                            <span className={`text-xs font-semibold px-2 py-0.5 rounded-full shrink-0 ${style.bg} ${style.text}`}>
+                                                {APPOINTMENT_STATUSES.find(s => s.value === appt.status)?.label || appt.status}
+                                            </span>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        )}
+                    </div>
+                );
+            })}
+        </div>
+    );
+}
+
 // ── Appointment card ──────────────────────────────────────
 function ApptCard({ appt, onClick }) {
     const style = APPOINTMENT_STATUS_STYLES[appt.status] || APPOINTMENT_STATUS_STYLES.scheduled;
@@ -559,7 +640,7 @@ export default function Appointments() {
                         </button>
                     </div>
                     <span className="text-sm font-medium text-text-secondary hidden sm:block">{weekLabel}</span>
-                    <button className="btn-primary" onClick={() => setModal({ mode: 'create', data: {} })}>
+                    <button className="btn-primary w-full sm:w-auto" onClick={() => setModal({ mode: 'create', data: {} })}>
                         <Plus className="w-4 h-4" /> New Appointment
                     </button>
                 </div>
@@ -568,8 +649,19 @@ export default function Appointments() {
             {/* Week label (mobile) */}
             <p className="text-sm text-text-secondary sm:hidden text-center">{weekLabel}</p>
 
-            {/* Calendar */}
-            <div className="card p-0 overflow-hidden">
+            {/* Mobile agenda view */}
+            <div className="sm:hidden">
+                <MobileAgendaView
+                    weekDays={weekDays}
+                    appointments={appointments}
+                    onApptClick={handleApptClick}
+                    onSlotClick={handleSlotClick}
+                    loading={loading}
+                />
+            </div>
+
+            {/* Desktop/tablet weekly calendar grid */}
+            <div className="hidden sm:block card p-0 overflow-hidden">
                 <div className="overflow-x-auto">
                     <div className="min-w-[760px]">
                         {/* Day headers */}

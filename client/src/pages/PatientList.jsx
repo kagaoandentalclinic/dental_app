@@ -9,9 +9,14 @@ import EmptyState from '../components/EmptyState';
 function SkeletonRow() {
     return (
         <tr>
-            {[1, 2, 3, 4, 5, 6, 7].map(i => (
-                <td key={i} className="px-4 py-3.5"><div className="skeleton h-3.5 rounded w-full" /></td>
-            ))}
+            <td className="hidden md:table-cell px-4 py-3.5"><div className="skeleton h-3.5 rounded w-full" /></td>
+            <td className="px-4 py-3.5"><div className="skeleton h-3.5 rounded w-full" /></td>
+            <td className="hidden sm:table-cell px-4 py-3.5"><div className="skeleton h-3.5 rounded w-full" /></td>
+            <td className="hidden md:table-cell px-4 py-3.5"><div className="skeleton h-3.5 rounded w-full" /></td>
+            <td className="hidden sm:table-cell px-4 py-3.5"><div className="skeleton h-3.5 rounded w-full" /></td>
+            <td className="hidden sm:table-cell px-4 py-3.5"><div className="skeleton h-3.5 rounded w-full" /></td>
+            <td className="px-4 py-3.5"><div className="skeleton h-3.5 rounded w-full" /></td>
+            <td className="px-4 py-3.5"><div className="skeleton h-3.5 rounded w-full" /></td>
         </tr>
     );
 }
@@ -76,13 +81,13 @@ export default function PatientList() {
                     <h1 className="text-xl font-bold text-text-primary">Patients</h1>
                     <p className="text-sm text-slate-400 mt-0.5">{data.total} total records</p>
                 </div>
-                <Link to="/patients/new" className="btn-primary">
+                <Link to="/patients/new" className="btn-primary w-full sm:w-auto">
                     <UserPlus className="w-4 h-4" /> Add Patient
                 </Link>
             </div>
 
             {/* Search */}
-            <div className="relative w-full max-w-md">
+            <div className="relative w-full">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-secondary" />
                 <input
                     type="text"
@@ -95,22 +100,39 @@ export default function PatientList() {
 
             {/* Table */}
             <div className="card p-0 overflow-hidden">
-                <div className="overflow-x-auto">
-                    <table className="data-table min-w-[860px]">
+                <div className="overflow-x-hidden">
+                    <table className="data-table w-full">
                         <thead>
                             <tr>
-                                {cols.map(col => (
-                                    <th
-                                        key={col.key}
-                                        className={`whitespace-nowrap ${col.sortable ? 'cursor-pointer hover:text-primary select-none' : ''}`}
-                                        onClick={() => col.sortable && handleSort(col.key)}
-                                    >
-                                        <span className="flex items-center gap-1">
-                                            {col.label}
-                                            {col.sortable && <SortIcon col={col.key} />}
-                                        </span>
-                                    </th>
-                                ))}
+                                <th className="hidden md:table-cell whitespace-nowrap">#</th>
+                                <th
+                                    className="whitespace-nowrap cursor-pointer hover:text-primary select-none"
+                                    onClick={() => handleSort('last_name')}
+                                >
+                                    <span className="flex items-center gap-1">
+                                        Name <SortIcon col="last_name" />
+                                    </span>
+                                </th>
+                                <th
+                                    className="hidden sm:table-cell whitespace-nowrap cursor-pointer hover:text-primary select-none"
+                                    onClick={() => handleSort('date_of_birth')}
+                                >
+                                    <span className="flex items-center gap-1">
+                                        Age <SortIcon col="date_of_birth" />
+                                    </span>
+                                </th>
+                                <th className="hidden md:table-cell whitespace-nowrap">Sex</th>
+                                <th
+                                    className="hidden sm:table-cell whitespace-nowrap cursor-pointer hover:text-primary select-none"
+                                    onClick={() => handleSort('phone')}
+                                >
+                                    <span className="flex items-center gap-1">
+                                        Phone <SortIcon col="phone" />
+                                    </span>
+                                </th>
+                                <th className="hidden sm:table-cell whitespace-nowrap">Last Visit</th>
+                                <th className="whitespace-nowrap">Issues</th>
+                                <th className="whitespace-nowrap">Actions</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -135,7 +157,7 @@ export default function PatientList() {
                                         className="cursor-pointer"
                                         onClick={() => navigate(`/patients/${p.id}`)}
                                     >
-                                        <td className="text-slate-400 tabular-nums">{start + idx}</td>
+                                        <td className="hidden md:table-cell text-slate-400 tabular-nums">{start + idx}</td>
                                         <td>
                                             <div className="flex items-center gap-3">
                                                 {p.profile_photo ? (
@@ -152,10 +174,10 @@ export default function PatientList() {
                                                 <span className="font-medium text-text-primary">{formatName(p, 'last-first')}</span>
                                             </div>
                                         </td>
-                                        <td className="text-slate-500">{calcAge(p.date_of_birth)} yrs</td>
-                                        <td className="text-slate-500 capitalize">{p.sex || '—'}</td>
-                                        <td className="text-slate-500">{p.phone || '—'}</td>
-                                        <td className="text-slate-500">{p.last_visit ? formatDate(p.last_visit) : <span className="text-slate-300 italic">No visits</span>}</td>
+                                        <td className="hidden sm:table-cell text-slate-500">{calcAge(p.date_of_birth)} yrs</td>
+                                        <td className="hidden md:table-cell text-slate-500 capitalize">{p.sex || '—'}</td>
+                                        <td className="hidden sm:table-cell text-slate-500">{p.phone || '—'}</td>
+                                        <td className="hidden sm:table-cell text-slate-500">{p.last_visit ? formatDate(p.last_visit) : <span className="text-slate-300 italic">No visits</span>}</td>
                                         <td>
                                             {parseInt(p.dental_issues) > 0
                                                 ? <span className="badge-red">{p.dental_issues} issue{p.dental_issues !== '1' ? 's' : ''}</span>

@@ -2,20 +2,22 @@ import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
     User, Building2, Users, Eye, EyeOff, Plus, Pencil,
-    ToggleLeft, ToggleRight, X, Save, KeyRound, ShieldCheck,
-    ClipboardList, Copy, Check, RefreshCw, Link2, Tablet, Download, Camera, Trash2,
+    ToggleLeft, ToggleRight, X, Save, ShieldCheck,
+    ClipboardList, Copy, Check, RefreshCw, Link2, Tablet, Download, Upload, Camera, Trash2,
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import client from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { formatDate } from '../utils/helpers';
 import { useToast } from '../components/Toast';
+import ConfirmDialog from '../components/ConfirmDialog';
 
 const ALL_TABS = [
     { key: 'account', label: 'Account', icon: User },
     { key: 'clinic', label: 'Clinic Info', icon: Building2 },
     { key: 'users', label: 'Users', icon: Users, adminOnly: true },
     { key: 'forms', label: 'Forms', icon: ClipboardList },
+    { key: 'backup', label: 'Backup', icon: Download, adminOnly: true },
 ];
 
 const ROLES = ['admin', 'dentist', 'hygienist', 'receptionist'];
@@ -61,10 +63,6 @@ function AccountTab() {
     const [profileLoading, setProfileLoading] = useState(false);
     const [photoPreview, setPhotoPreview] = useState(null); // local preview before upload
     const [photoLoading, setPhotoLoading] = useState(false);
-
-    const [pwd, setPwd] = useState({ currentPassword: '', newPassword: '', confirm: '' });
-    const [pwdLoading, setPwdLoading] = useState(false);
-    const [showPwd, setShowPwd] = useState({ current: false, new: false, confirm: false });
 
     useEffect(() => {
         if (admin) {
@@ -130,31 +128,6 @@ function AccountTab() {
             setPhotoLoading(false);
         }
     };
-
-
-    const handlePasswordSubmit = async (e) => {
-        e.preventDefault();
-        if (pwd.newPassword !== pwd.confirm) {
-            showToast('New passwords do not match', 'error');
-            return;
-        }
-        setPwdLoading(true);
-        try {
-            await client.put('/auth/change-password', {
-                currentPassword: pwd.currentPassword,
-                newPassword: pwd.newPassword,
-            });
-            setPwd({ currentPassword: '', newPassword: '', confirm: '' });
-            showToast('Password changed successfully', 'success');
-        } catch (err) {
-            showToast(err.response?.data?.error || 'Failed to change password', 'error');
-        } finally {
-            setPwdLoading(false);
-        }
-    };
-
-    const toggleShow = (field) => setShowPwd(s => ({ ...s, [field]: !s[field] }));
-
     return (
         <div className="space-y-6">
 
@@ -295,40 +268,10 @@ function AccountTab() {
 
             {/* Password */}
             <div className="card">
-                <div className="flex items-center gap-2 mb-4">
-                    <KeyRound className="w-4 h-4 text-text-secondary" />
-                    <SectionTitle>Change Password</SectionTitle>
-                </div>
-                <form onSubmit={handlePasswordSubmit} className="space-y-4">
-                    {[
-                        { key: 'current', label: 'Current Password', field: 'currentPassword' },
-                        { key: 'new', label: 'New Password', field: 'newPassword' },
-                        { key: 'confirm', label: 'Confirm New Password', field: 'confirm' },
-                    ].map(({ key, label, field }) => (
-                        <FieldGroup key={key} label={label}>
-                            <div className="relative">
-                                <input
-                                    type={showPwd[key] ? 'text' : 'password'}
-                                    className="form-input pr-10"
-                                    value={pwd[field]}
-                                    onChange={e => setPwd(s => ({ ...s, [field]: e.target.value }))}
-                                    required
-                                    minLength={field === 'currentPassword' ? 1 : 6}
-                                />
-                                <button
-                                    type="button"
-                                    onClick={() => toggleShow(key)}
-                                    className="absolute right-3 top-1/2 -translate-y-1/2 text-text-secondary hover:text-text-primary"
-                                >
-                                    {showPwd[key] ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                                </button>
-                            </div>
-                        </FieldGroup>
-                    ))}
-                    <div className="pt-1">
-                        <SaveButton loading={pwdLoading} label="Change Password" />
-                    </div>
-                </form>
+                <SectionTitle>Password Reset</SectionTitle>
+                <p className="text-sm text-text-secondary">
+                    For password resets, please contact the system administrator.
+                </p>
             </div>
         </div>
     );
@@ -431,9 +374,10 @@ function ClinicTab() {
 
 // ─── User Modal ───────────────────────────────────────────────────────────────
 
-function UserModal({ user, onClose, onSaved }) {
+function UserModal({ user, currentAdminId, onClose, onSaved }) {
     const { showToast } = useToast();
     const isEdit = !!user;
+    const canResetPassword = isEdit && user?.id !== currentAdminId;
     const [form, setForm] = useState({
         full_name: user?.full_name || '',
         username: user?.username || '',
@@ -449,12 +393,14 @@ function UserModal({ user, onClose, onSaved }) {
         setLoading(true);
         try {
             if (isEdit) {
+                const didResetPassword = Boolean(form.password);
                 const res = await client.put(`/settings/users/${user.id}`, {
                     full_name: form.full_name,
                     email: form.email,
                     role: form.role,
+                    password: form.password || undefined,
                 });
-                onSaved(res.data, 'update');
+                onSaved(res.data, didResetPassword ? 'update-password' : 'update');
             } else {
                 const res = await client.post('/settings/users', form);
                 onSaved(res.data, 'create');
@@ -533,6 +479,30 @@ function UserModal({ user, onClose, onSaved }) {
                             </div>
                         </FieldGroup>
                     )}
+                    {canResetPassword && (
+                        <FieldGroup label="Reset Password">
+                            <div className="relative">
+                                <input
+                                    type={showPwd ? 'text' : 'password'}
+                                    className="form-input pr-10"
+                                    value={form.password}
+                                    onChange={e => setForm(s => ({ ...s, password: e.target.value }))}
+                                    minLength={6}
+                                    placeholder="Leave blank to keep current password"
+                                />
+                                <button
+                                    type="button"
+                                    onClick={() => setShowPwd(v => !v)}
+                                    className="absolute right-3 top-1/2 -translate-y-1/2 text-text-secondary hover:text-text-primary"
+                                >
+                                    {showPwd ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                                </button>
+                            </div>
+                            <p className="mt-1 text-xs text-text-secondary">
+                                Enter a new password only if you want to reset this staff member&apos;s login.
+                            </p>
+                        </FieldGroup>
+                    )}
                     <FieldGroup label="Role">
                         <select
                             className="form-input"
@@ -566,6 +536,7 @@ function UsersTab() {
     const [users, setUsers] = useState([]);
     const [loading, setLoading] = useState(true);
     const [modal, setModal] = useState(null); // null | 'add' | user object
+    const [confirmDelete, setConfirmDelete] = useState(null);
 
     useEffect(() => {
         if (!isAdmin) { setLoading(false); return; }
@@ -579,6 +550,9 @@ function UsersTab() {
         if (type === 'create') {
             setUsers(u => [...u, saved]);
             showToast('Staff member added', 'success');
+        } else if (type === 'update-password') {
+            setUsers(u => u.map(x => x.id === saved.id ? { ...x, ...saved } : x));
+            showToast('Staff member updated and password changes saved', 'success');
         } else {
             setUsers(u => u.map(x => x.id === saved.id ? { ...x, ...saved } : x));
             showToast('Staff member updated', 'success');
@@ -592,6 +566,18 @@ function UsersTab() {
             showToast(`${user.full_name} ${res.data.is_active ? 'activated' : 'deactivated'}`, 'success');
         } catch (err) {
             showToast(err.response?.data?.error || 'Failed to update status', 'error');
+        }
+    };
+
+    const handleDeleteUser = async () => {
+        if (!confirmDelete) return;
+        try {
+            await client.delete(`/settings/users/${confirmDelete.id}`);
+            setUsers(u => u.filter(x => x.id !== confirmDelete.id));
+            showToast('Staff member deleted', 'success');
+            setConfirmDelete(null);
+        } catch (err) {
+            showToast(err.response?.data?.error || 'Failed to delete user', 'error');
         }
     };
 
@@ -678,16 +664,25 @@ function UsersTab() {
                                                     <Pencil className="w-4 h-4" />
                                                 </button>
                                                 {u.id !== admin?.id && (
-                                                    <button
-                                                        onClick={() => handleToggleStatus(u)}
-                                                        className="btn-icon"
-                                                        title={u.is_active ? 'Deactivate' : 'Activate'}
-                                                    >
-                                                        {u.is_active
-                                                            ? <ToggleRight className="w-4 h-4 text-primary" />
-                                                            : <ToggleLeft className="w-4 h-4 text-text-secondary" />
-                                                        }
-                                                    </button>
+                                                    <>
+                                                        <button
+                                                            onClick={() => handleToggleStatus(u)}
+                                                            className="btn-icon"
+                                                            title={u.is_active ? 'Deactivate' : 'Activate'}
+                                                        >
+                                                            {u.is_active
+                                                                ? <ToggleRight className="w-4 h-4 text-primary" />
+                                                                : <ToggleLeft className="w-4 h-4 text-text-secondary" />
+                                                            }
+                                                        </button>
+                                                        <button
+                                                            onClick={() => setConfirmDelete(u)}
+                                                            className="btn-icon text-red-600 hover:text-red-700"
+                                                            title="Delete"
+                                                        >
+                                                            <Trash2 className="w-4 h-4" />
+                                                        </button>
+                                                    </>
                                                 )}
                                             </div>
                                         </td>
@@ -703,11 +698,22 @@ function UsersTab() {
                 {modal && (
                     <UserModal
                         user={modal === 'add' ? null : modal}
+                        currentAdminId={admin?.id}
                         onClose={() => setModal(null)}
                         onSaved={handleSaved}
                     />
                 )}
             </AnimatePresence>
+            <ConfirmDialog
+                isOpen={!!confirmDelete}
+                title="Delete Staff Member"
+                message={confirmDelete
+                    ? `Delete ${confirmDelete.full_name}? This cannot be undone. If this staff member is linked to existing records, please deactivate the account instead.`
+                    : ''}
+                confirmLabel="Delete"
+                onConfirm={handleDeleteUser}
+                onCancel={() => setConfirmDelete(null)}
+            />
         </>
     );
 }
@@ -1137,6 +1143,158 @@ function FormsTab() {
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
+function BackupTab() {
+    const { showToast } = useToast();
+    const fileInputRef = useRef(null);
+    const [downloading, setDownloading] = useState(false);
+    const [restoring, setRestoring] = useState(false);
+    const [restoreFile, setRestoreFile] = useState(null);
+    const [confirmRestore, setConfirmRestore] = useState(false);
+
+    const handleDownloadBackup = async () => {
+        setDownloading(true);
+        try {
+            const res = await client.get('/settings/backup');
+            const timestamp = (res.data.exported_at || new Date().toISOString()).replace(/[:.]/g, '-');
+            const blob = new Blob([JSON.stringify(res.data, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `kagaoan-backup-${timestamp}.gz`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+            showToast('Backup downloaded successfully', 'success');
+        } catch (err) {
+            showToast(err.response?.data?.error || 'Failed to download backup', 'error');
+        } finally {
+            setDownloading(false);
+        }
+    };
+
+    const handleRestoreFileChange = (e) => {
+        const file = e.target.files?.[0] || null;
+        setRestoreFile(file);
+    };
+
+    const handleRestoreBackup = async () => {
+        if (!restoreFile) return;
+
+        setRestoring(true);
+        try {
+            const raw = await restoreFile.text();
+            let backup;
+
+            try {
+                backup = JSON.parse(raw);
+            } catch {
+                showToast('Invalid backup file. Expected JSON content inside the .gz file.', 'error');
+                return;
+            }
+
+            await client.post('/settings/backup/restore', { backup });
+            setRestoreFile(null);
+            setConfirmRestore(false);
+            if (fileInputRef.current) fileInputRef.current.value = '';
+            showToast('Backup restored successfully', 'success');
+        } catch (err) {
+            showToast(err.response?.data?.error || 'Failed to restore backup', 'error');
+        } finally {
+            setRestoring(false);
+        }
+    };
+
+    return (
+        <>
+            <div className="space-y-6">
+                <div className="card space-y-4">
+                    <div className="flex items-start gap-4">
+                        <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
+                            <Download className="w-5 h-5 text-primary" />
+                        </div>
+                        <div>
+                            <p className="font-semibold text-text-primary">Data Backup</p>
+                            <p className="text-sm text-text-secondary mt-0.5">
+                                Download a full clinic backup as a `.gz` file. The file extension is `.gz`, but the contents are JSON for easy restore.
+                            </p>
+                        </div>
+                    </div>
+                    <button
+                        type="button"
+                        onClick={handleDownloadBackup}
+                        disabled={downloading}
+                        className="btn-primary gap-2 w-full sm:w-auto"
+                    >
+                        <Download className="w-4 h-4" />
+                        {downloading ? 'Preparing Backup...' : 'Download Backup'}
+                    </button>
+                </div>
+
+                <div className="card space-y-4">
+                    <div className="flex items-start gap-4">
+                        <div className="w-10 h-10 rounded-xl bg-red-100 flex items-center justify-center shrink-0 mt-0.5">
+                            <Upload className="w-5 h-5 text-red-600" />
+                        </div>
+                        <div>
+                            <p className="font-semibold text-text-primary">Restore Backup</p>
+                            <p className="text-sm text-text-secondary mt-0.5">
+                                Restore replaces the current clinic data with the contents of the selected backup file, including staff, patients, appointments, forms, and photos.
+                            </p>
+                        </div>
+                    </div>
+
+                    <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept=".gz,.json,application/json"
+                        className="hidden"
+                        onChange={handleRestoreFileChange}
+                    />
+
+                    <div className="flex flex-col sm:flex-row gap-3">
+                        <button
+                            type="button"
+                            onClick={() => fileInputRef.current?.click()}
+                            className="btn-secondary gap-2 w-full sm:w-auto"
+                        >
+                            <Upload className="w-4 h-4" />
+                            {restoreFile ? 'Change Backup File' : 'Choose Backup File'}
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setConfirmRestore(true)}
+                            disabled={!restoreFile || restoring}
+                            className="btn-danger gap-2 w-full sm:w-auto"
+                        >
+                            <RefreshCw className={`w-4 h-4 ${restoring ? 'animate-spin' : ''}`} />
+                            {restoring ? 'Restoring...' : 'Restore Backup'}
+                        </button>
+                    </div>
+
+                    <p className="text-xs text-text-secondary">
+                        {restoreFile
+                            ? `Selected file: ${restoreFile.name}`
+                            : 'Accepted file types: .gz or .json. The .gz file should contain JSON data.'}
+                    </p>
+                </div>
+            </div>
+
+            <ConfirmDialog
+                isOpen={confirmRestore}
+                title="Restore Backup"
+                message={restoreFile
+                    ? `Restore data from ${restoreFile.name}? This will replace the current clinic data and cannot be undone.`
+                    : ''}
+                confirmLabel="Restore"
+                confirmClass="btn-danger"
+                onConfirm={handleRestoreBackup}
+                onCancel={() => !restoring && setConfirmRestore(false)}
+            />
+        </>
+    );
+}
+
 export default function Settings() {
     const { admin } = useAuth();
     const isAdmin = admin?.role === 'admin';
@@ -1175,6 +1333,7 @@ export default function Settings() {
                     {activeTab === 'clinic' && <ClinicTab />}
                     {activeTab === 'users' && <UsersTab />}
                     {activeTab === 'forms' && <FormsTab />}
+                    {activeTab === 'backup' && isAdmin && <BackupTab />}
                 </motion.div>
             </AnimatePresence>
         </div>

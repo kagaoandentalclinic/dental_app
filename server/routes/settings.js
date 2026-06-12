@@ -16,6 +16,72 @@ function requireAdmin(req, res, next) {
     next();
 }
 
+const BACKUP_TABLES = [
+    { name: 'clinic_settings', orderBy: 'id ASC' },
+    { name: 'admins', orderBy: 'created_at ASC, id ASC' },
+    { name: 'patients', orderBy: 'created_at ASC, id ASC' },
+    { name: 'patient_contacts', orderBy: 'patient_id ASC' },
+    { name: 'patient_profile_details', orderBy: 'patient_id ASC' },
+    { name: 'patient_insurance', orderBy: 'patient_id ASC' },
+    { name: 'medical_history', orderBy: 'patient_id ASC, id ASC' },
+    { name: 'dental_chart', orderBy: 'patient_id ASC, tooth_number ASC, id ASC' },
+    { name: 'visits', orderBy: 'visit_date ASC, id ASC' },
+    { name: 'orthodontic_cases', orderBy: 'created_at ASC, id ASC' },
+    { name: 'orthodontic_adjustments', orderBy: 'adjustment_date ASC, id ASC' },
+    { name: 'patient_photos', orderBy: 'uploaded_at ASC, id ASC' },
+    { name: 'appointments', orderBy: 'appointment_date ASC, id ASC' },
+    { name: 'intake_submissions', orderBy: 'submitted_at ASC, id ASC' },
+];
+
+const BACKUP_TABLE_NAMES = BACKUP_TABLES.map(table => table.name);
+
+function quoteIdentifier(identifier) {
+    return `"${String(identifier).replace(/"/g, '""')}"`;
+}
+
+async function fetchTableRows(db, table) {
+    const orderBy = table.orderBy ? ` ORDER BY ${table.orderBy}` : '';
+    const result = await db.query(`SELECT * FROM ${quoteIdentifier(table.name)}${orderBy}`);
+    return result.rows;
+}
+
+async function insertRows(db, tableName, rows) {
+    if (!Array.isArray(rows) || rows.length === 0) return;
+
+    const columns = Object.keys(rows[0]);
+    if (columns.length === 0) return;
+
+    const maxParams = 32000;
+    const batchSize = Math.max(1, Math.floor(maxParams / columns.length));
+
+    for (let start = 0; start < rows.length; start += batchSize) {
+        const batch = rows.slice(start, start + batchSize);
+        const values = [];
+        const placeholders = batch.map((row, rowIndex) => {
+            return `(${columns.map((column, columnIndex) => {
+                values.push(row[column] ?? null);
+                return `$${rowIndex * columns.length + columnIndex + 1}`;
+            }).join(', ')})`;
+        }).join(', ');
+
+        await db.query(
+            `INSERT INTO ${quoteIdentifier(tableName)} (${columns.map(quoteIdentifier).join(', ')})
+             VALUES ${placeholders}`,
+            values
+        );
+    }
+}
+
+async function resetClinicSettingsSequence(db) {
+    await db.query(`
+        SELECT setval(
+            pg_get_serial_sequence('clinic_settings', 'id'),
+            COALESCE((SELECT MAX(id) FROM clinic_settings), 1),
+            EXISTS (SELECT 1 FROM clinic_settings)
+        )
+    `);
+}
+
 // ─── Profile ──────────────────────────────────────────────────────────────────
 
 // GET /api/settings/profile
@@ -216,20 +282,38 @@ router.put('/users/:id', requireAdmin,
     body('full_name').trim().notEmpty().withMessage('Full name is required'),
     body('email').isEmail().normalizeEmail().withMessage('Valid email is required'),
     body('role').isIn(['admin', 'dentist', 'hygienist', 'receptionist']).withMessage('Invalid role'),
+    body('password').optional({ checkFalsy: true }).isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
     async (req, res) => {
         const errors = validationResult(req);
         if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
         const { id } = req.params;
-        const { full_name, email, role } = req.body;
+        const { full_name, email, role, password } = req.body;
         try {
+            if (id === req.admin.id && password) {
+                return res.status(400).json({ error: 'Use Account settings to change your own password' });
+            }
+
             // Prevent admin from changing their own role
-            const query = req.admin.id === id
-                ? `UPDATE admins SET full_name = $1, email = $2 WHERE id = $3 RETURNING id, username, email, full_name, role, is_active`
-                : `UPDATE admins SET full_name = $1, email = $2, role = $3 WHERE id = $4 RETURNING id, username, email, full_name, role, is_active`;
-            const params = req.admin.id === id
-                ? [full_name, email, id]
-                : [full_name, email, role, id];
+            let query;
+            let params;
+
+            if (req.admin.id === id) {
+                query = `UPDATE admins SET full_name = $1, email = $2 WHERE id = $3
+                         RETURNING id, username, email, full_name, role, is_active`;
+                params = [full_name, email, id];
+            } else if (password) {
+                const password_hash = await bcrypt.hash(password, 10);
+                query = `UPDATE admins
+                         SET full_name = $1, email = $2, role = $3, password_hash = $4
+                         WHERE id = $5
+                         RETURNING id, username, email, full_name, role, is_active`;
+                params = [full_name, email, role, password_hash, id];
+            } else {
+                query = `UPDATE admins SET full_name = $1, email = $2, role = $3 WHERE id = $4
+                         RETURNING id, username, email, full_name, role, is_active`;
+                params = [full_name, email, role, id];
+            }
 
             // Check email uniqueness
             const conflict = await pool.query(
@@ -271,6 +355,30 @@ router.patch('/users/:id/status', requireAdmin, async (req, res) => {
 });
 
 // ─── Intake Form Settings ─────────────────────────────────────────────────────
+
+// DELETE /api/settings/users/:id (admin-only)
+router.delete('/users/:id', requireAdmin, async (req, res) => {
+    const { id } = req.params;
+    if (id === req.admin.id) {
+        return res.status(400).json({ error: 'Cannot delete your own account' });
+    }
+    try {
+        const result = await pool.query(
+            'DELETE FROM admins WHERE id = $1 RETURNING id',
+            [id]
+        );
+        if (result.rows.length === 0) return res.status(404).json({ error: 'User not found' });
+        res.status(204).send();
+    } catch (err) {
+        if (err.code === '23503') {
+            return res.status(409).json({
+                error: 'Cannot delete this user because they are linked to existing records. Deactivate the account instead.',
+            });
+        }
+        console.error(err);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
 
 function generateSlug() {
     return Math.random().toString(36).slice(2, 8) + Math.random().toString(36).slice(2, 8);
@@ -488,6 +596,80 @@ router.post('/intake/regenerate', async (req, res) => {
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'Server error' });
+    }
+});
+
+// GET /api/settings/backup (admin-only)
+router.get('/backup', requireAdmin, async (req, res) => {
+    const db = await pool.connect();
+    try {
+        const tables = {};
+        for (const table of BACKUP_TABLES) {
+            tables[table.name] = await fetchTableRows(db, table);
+        }
+
+        res.json({
+            format: 'kagaoan-dental-backup',
+            version: 1,
+            exported_at: new Date().toISOString(),
+            exported_by: {
+                id: req.admin.id,
+                username: req.admin.username,
+                full_name: req.admin.full_name,
+            },
+            tables,
+        });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Failed to generate backup' });
+    } finally {
+        db.release();
+    }
+});
+
+// POST /api/settings/backup/restore (admin-only)
+router.post('/backup/restore', requireAdmin, async (req, res) => {
+    const { backup } = req.body;
+    if (!backup || typeof backup !== 'object' || backup.format !== 'kagaoan-dental-backup' || !backup.tables) {
+        return res.status(400).json({ error: 'Invalid backup file' });
+    }
+
+    for (const tableName of BACKUP_TABLE_NAMES) {
+        if (!Array.isArray(backup.tables[tableName])) {
+            return res.status(400).json({ error: `Backup data for table "${tableName}" is missing or invalid` });
+        }
+    }
+
+    if (backup.tables.admins.length === 0) {
+        return res.status(400).json({ error: 'Backup must include at least one admin account' });
+    }
+
+    const db = await pool.connect();
+    try {
+        await db.query('BEGIN');
+        await db.query(`TRUNCATE TABLE ${BACKUP_TABLE_NAMES.map(quoteIdentifier).join(', ')} RESTART IDENTITY CASCADE`);
+
+        for (const tableName of BACKUP_TABLE_NAMES) {
+            await insertRows(db, tableName, backup.tables[tableName]);
+        }
+
+        await resetClinicSettingsSequence(db);
+        await db.query('COMMIT');
+
+        const restoredCounts = Object.fromEntries(
+            BACKUP_TABLE_NAMES.map(tableName => [tableName, backup.tables[tableName].length])
+        );
+
+        res.json({
+            message: 'Backup restored successfully',
+            restored_counts: restoredCounts,
+        });
+    } catch (err) {
+        await db.query('ROLLBACK');
+        console.error(err);
+        res.status(500).json({ error: 'Failed to restore backup' });
+    } finally {
+        db.release();
     }
 });
 

@@ -431,7 +431,7 @@ export default function PatientIntake() {
 
                             <div className="card">
                                 <p className="text-xs text-text-secondary mb-4">
-                                    By submitting this form, you authorize Plaza Maestro Dental Clinic to use this information for your dental treatment and care.
+                                    By submitting this form, you authorize Kagaoan Dental Clinic to use this information for your dental treatment and care.
                                 </p>
                                 <div className="flex flex-col sm:flex-row justify-between gap-3">
                                     <div className="flex gap-3">

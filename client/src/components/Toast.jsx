@@ -24,6 +24,17 @@ export function ToastProvider({ children }) {
         error: (msg) => addToast(msg, 'error', 5000),
         info: (msg) => addToast(msg, 'info'),
         warning: (msg) => addToast(msg, 'warning'),
+        showToast: (message, type = 'success', duration) => {
+            if (typeof duration === 'number') {
+                addToast(message, type, duration);
+                return;
+            }
+            if (type === 'error') {
+                addToast(message, 'error', 5000);
+                return;
+            }
+            addToast(message, type);
+        },
     };
 
     return (

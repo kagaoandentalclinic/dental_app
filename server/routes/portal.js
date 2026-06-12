@@ -10,6 +10,7 @@ const { logAudit } = require('../utils/auditLogs');
 const logger = require('../utils/logger');
 const { sendPortalVerificationEmail } = require('../utils/portalEmail');
 const { verifyGoogleIdToken } = require('../utils/googleAuth');
+const { buildClinicAppointmentDateTime } = require('../utils/appointmentDate');
 
 const VERIFICATION_WINDOW_HOURS = 48;
 
@@ -661,8 +662,8 @@ router.post('/book', verifyPortalPatient, async (req, res) => {
         return res.status(400).json({ error: 'Preferred date, time, and service are required.' });
     }
 
-    const appointmentDate = new Date(`${preferred_date}T${preferred_time}:00`);
-    if (Number.isNaN(appointmentDate.getTime())) {
+    const appointmentDate = buildClinicAppointmentDateTime(preferred_date, preferred_time);
+    if (!appointmentDate) {
         return res.status(400).json({ error: 'Invalid appointment date or time.' });
     }
 

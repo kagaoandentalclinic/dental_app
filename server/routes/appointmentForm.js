@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../db/pool');
 const { publicFormLimiter, checkHoneypot, checkTiming, checkDuplicateCooldown, checkDeviceId } = require('../middleware/antiSpam');
+const { buildClinicAppointmentDateTime } = require('../utils/appointmentDate');
 
 async function getFormSettings(slug) {
     const result = await pool.query(
@@ -72,7 +73,10 @@ router.post('/:slug', publicFormLimiter, checkHoneypot, checkTiming, checkDevice
 
         // Build appointment datetime from preferred date + time
         const timeStr = preferred_time || '09:00';
-        const appointmentDate = new Date(`${preferred_date}T${timeStr}:00`).toISOString();
+        const appointmentDate = buildClinicAppointmentDateTime(preferred_date, timeStr);
+        if (!appointmentDate) {
+            return res.status(400).json({ error: 'Invalid preferred date or time' });
+        }
 
         // Create appointment with 'pending' status (patient-submitted request)
         const apptRes = await pool.query(`
@@ -82,7 +86,7 @@ router.post('/:slug', publicFormLimiter, checkHoneypot, checkTiming, checkDevice
             RETURNING id
         `, [
             patient.id,
-            appointmentDate,
+            appointmentDate.toISOString(),
             appointment_type || 'checkup',
             notes || null,
         ]);

@@ -4,6 +4,17 @@ import portalClient from '../api/portalClient';
 
 const SERVICES = ['Checkup', 'Cleaning', 'Extraction', 'Braces Consultation', 'Tooth Filling', 'Root Canal', 'Whitening', 'Other'];
 
+function formatTimeOptionLabel(slot) {
+    const [hourText, minuteText] = String(slot || '').split(':');
+    const hour = Number(hourText);
+    const minute = Number(minuteText || 0);
+    if (!Number.isFinite(hour) || !Number.isFinite(minute)) return slot;
+
+    const suffix = hour >= 12 ? 'PM' : 'AM';
+    const normalizedHour = hour % 12 || 12;
+    return `${normalizedHour}:${String(minute).padStart(2, '0')} ${suffix}`;
+}
+
 export default function PortalBook() {
     const [form, setForm] = useState({
         preferred_date: '',
@@ -57,7 +68,7 @@ export default function PortalBook() {
                 <div>
                     <label className="form-label">Preferred Time</label>
                     <select className="form-input" value={form.preferred_time} onChange={(e) => setForm(f => ({ ...f, preferred_time: e.target.value }))}>
-                        {timeSlots.map(slot => <option key={slot} value={slot}>{slot}</option>)}
+                        {timeSlots.map(slot => <option key={slot} value={slot}>{formatTimeOptionLabel(slot)}</option>)}
                     </select>
                 </div>
                 <div className="sm:col-span-2">

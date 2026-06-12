@@ -1,21 +1,39 @@
 import { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { Save, RefreshCw, Plus, Trash2, X } from 'lucide-react';
+import Odontogram from 'react-odontogram';
+import 'react-odontogram/style.css';
 import client from '../../api/client';
 import { useToast } from '../../components/Toast';
 import { TOOTH_STATUSES, TOOTH_STATUS_MAP } from '../../utils/constants';
-import ToothButton from './ToothButton';
 import ToothStatusModal from './ToothStatusModal';
 import ConfirmDialog from '../../components/ConfirmDialog';
 
-// Arch layout: upper teeth 1-16 (right to left from viewer), lower 17-32 (right to left from viewer)
-// We display right-to-patient on left, left-to-patient on right
-const UPPER_TEETH = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
-const LOWER_TEETH = [32, 31, 30, 29, 28, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17];
-
-// Curved Y offsets for arch appearance
-const UPPER_CURVE = [8, 4, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 4, 8]; // px offset from top (center teeth higher)
-const LOWER_CURVE = [8, 4, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 4, 8]; // same pattern mirrored
+const STANDARD_TOOTH_NUMBERS = Array.from({ length: 32 }, (_, index) => index + 1);
+const NOTATION_OPTIONS = ['Universal', 'FDI', 'Palmer'];
+const UNIVERSAL_TO_FDI = {
+    1: '18', 2: '17', 3: '16', 4: '15', 5: '14', 6: '13', 7: '12', 8: '11',
+    9: '21', 10: '22', 11: '23', 12: '24', 13: '25', 14: '26', 15: '27', 16: '28',
+    17: '38', 18: '37', 19: '36', 20: '35', 21: '34', 22: '33', 23: '32', 24: '31',
+    25: '41', 26: '42', 27: '43', 28: '44', 29: '45', 30: '46', 31: '47', 32: '48',
+};
+const FDI_TO_UNIVERSAL = Object.fromEntries(
+    Object.entries(UNIVERSAL_TO_FDI).map(([universal, fdi]) => [fdi, Number(universal)])
+);
+const UNIVERSAL_TO_NAME = {
+    1: 'Upper Right Third Molar', 2: 'Upper Right Second Molar', 3: 'Upper Right First Molar',
+    4: 'Upper Right Second Premolar', 5: 'Upper Right First Premolar', 6: 'Upper Right Canine',
+    7: 'Upper Right Lateral Incisor', 8: 'Upper Right Central Incisor',
+    9: 'Upper Left Central Incisor', 10: 'Upper Left Lateral Incisor', 11: 'Upper Left Canine',
+    12: 'Upper Left First Premolar', 13: 'Upper Left Second Premolar', 14: 'Upper Left First Molar',
+    15: 'Upper Left Second Molar', 16: 'Upper Left Third Molar',
+    17: 'Lower Left Third Molar', 18: 'Lower Left Second Molar', 19: 'Lower Left First Molar',
+    20: 'Lower Left Second Premolar', 21: 'Lower Left First Premolar', 22: 'Lower Left Canine',
+    23: 'Lower Left Lateral Incisor', 24: 'Lower Left Central Incisor',
+    25: 'Lower Right Central Incisor', 26: 'Lower Right Lateral Incisor', 27: 'Lower Right Canine',
+    28: 'Lower Right First Premolar', 29: 'Lower Right Second Premolar', 30: 'Lower Right First Molar',
+    31: 'Lower Right Second Molar', 32: 'Lower Right Third Molar',
+};
 
 export default function DentalChartTab({ patient }) {
     const toast = useToast();
@@ -24,6 +42,9 @@ export default function DentalChartTab({ patient }) {
     const [saving, setSaving] = useState(false);
     const [changes, setChanges] = useState({});
     const [selectedTooth, setSelectedTooth] = useState(null);
+    const [notation, setNotation] = useState('Universal');
+    const [odontogramResetKey, setOdontogramResetKey] = useState(0);
+    const [viewportMode, setViewportMode] = useState('desktop');
 
     // Extra teeth state
     const [addExtraOpen, setAddExtraOpen] = useState(false);
@@ -46,6 +67,22 @@ export default function DentalChartTab({ patient }) {
 
     useEffect(() => { fetchChart(); }, [fetchChart]);
 
+    useEffect(() => {
+        const updateViewportMode = () => {
+            if (window.innerWidth < 640) {
+                setViewportMode('mobile');
+            } else if (window.innerWidth < 1024) {
+                setViewportMode('tablet');
+            } else {
+                setViewportMode('desktop');
+            }
+        };
+
+        updateViewportMode();
+        window.addEventListener('resize', updateViewportMode);
+        return () => window.removeEventListener('resize', updateViewportMode);
+    }, []);
+
     const getTooth = (num) => {
         const change = changes[num];
         const base = teeth[num];
@@ -59,6 +96,7 @@ export default function DentalChartTab({ patient }) {
             [num]: { ...(prev[num] || {}), tooth_number: num, ...update },
         }));
         setSelectedTooth(null);
+        setOdontogramResetKey(v => v + 1);
     };
 
     const handleSave = async () => {
@@ -76,9 +114,10 @@ export default function DentalChartTab({ patient }) {
         }
     };
 
-    // Extra teeth handlers
     const extraTeeth = Object.values(teeth).filter(t => t.is_extra);
-    const standardTeeth = Object.values({ ...teeth }).filter(t => !t.is_extra);
+    const currentExtraTeeth = extraTeeth.map(et => (
+        changes[et.tooth_number] ? { ...et, ...changes[et.tooth_number] } : et
+    ));
 
     const handleAddExtra = async () => {
         if (!extraLabel.trim()) return;
@@ -113,36 +152,80 @@ export default function DentalChartTab({ patient }) {
         }
     };
 
-    // Stats
-    const allTeeth = Object.keys({ ...teeth, ...changes }).map(n => getTooth(parseInt(n)));
-    const standardCount = allTeeth.filter(t => !teeth[parseInt(Object.keys(teeth).find(k => parseInt(k) === parseInt(Object.keys(t)[0])))]?.is_extra).length;
+    const handleOdontogramChange = (selected) => {
+        const active = selected[selected.length - 1];
+        if (!active) {
+            setSelectedTooth(null);
+            return;
+        }
+
+        const universalNumber = FDI_TO_UNIVERSAL[active.notations.fdi];
+        if (!universalNumber) return;
+
+        setSelectedTooth({
+            number: universalNumber,
+            tooth: getTooth(universalNumber),
+        });
+    };
+
+    const standardTeeth = STANDARD_TOOTH_NUMBERS.map(getTooth);
+    const allTeeth = [...standardTeeth, ...currentExtraTeeth];
     const healthy = allTeeth.filter(t => t.status === 'healthy').length;
     const issues = allTeeth.filter(t => t.status !== 'healthy').length;
     const hasChanges = Object.keys(changes).length > 0;
+    const isMobile = viewportMode === 'mobile';
+    const isTablet = viewportMode === 'tablet';
+    const odontogramLayout = isMobile ? 'square' : 'circle';
+    const odontogramTooltipPlacement = isMobile ? 'bottom' : 'top';
+    const odontogramMaxWidth = isMobile ? 560 : isTablet ? 760 : 860;
+    const odontogramConditions = TOOTH_STATUSES
+        .filter(status => status.value !== 'healthy')
+        .map(status => ({
+            label: status.label,
+            teeth: standardTeeth
+                .filter(tooth => tooth.status === status.value)
+                .map(tooth => `teeth-${UNIVERSAL_TO_FDI[tooth.tooth_number]}`),
+            fillColor: status.bg,
+            outlineColor: status.color,
+        }))
+        .filter(group => group.teeth.length > 0);
 
-    const renderArch = (numbers, curve, isUpper) => (
-        <div className={`flex ${isUpper ? 'items-start' : 'items-end'} justify-center gap-1.5 px-6 py-3`}>
-            {numbers.map((num, i) => {
-                const t = getTooth(num);
-                // Upper: push corner teeth down via marginTop to create arch curve
-                // Lower: push corner teeth up via marginBottom
-                const yOffset = isUpper
-                    ? { marginTop: `${curve[i]}px` }
-                    : { marginBottom: `${curve[i]}px` };
-                return (
-                    <ToothButton
-                        key={num}
-                        number={num}
-                        status={t?.status || 'healthy'}
-                        isUpper={isUpper}
-                        hasChange={!!changes[num]}
-                        style={yOffset}
-                        onClick={() => setSelectedTooth({ number: num, tooth: t })}
-                    />
-                );
-            })}
-        </div>
-    );
+    const renderTooltip = (payload) => {
+        if (!payload) return null;
+
+        const universalNumber = FDI_TO_UNIVERSAL[payload.notations.fdi];
+        const tooth = universalNumber ? getTooth(universalNumber) : null;
+        const statusConfig = TOOTH_STATUS_MAP[tooth?.status || 'healthy'] || TOOTH_STATUS_MAP.healthy;
+
+        return (
+            <div className="min-w-[180px] max-w-[240px] whitespace-normal">
+                <p className="font-semibold text-sm">
+                    {UNIVERSAL_TO_NAME[universalNumber] || `Tooth ${payload.notations.universal}`}
+                </p>
+                <p className="text-xs mt-1">
+                    {notation}: {notation === 'FDI'
+                        ? payload.notations.fdi
+                        : notation === 'Palmer'
+                            ? payload.notations.palmer
+                            : payload.notations.universal}
+                </p>
+                <p className="text-xs mt-1">
+                    Status:{' '}
+                    <span style={{ color: statusConfig.text, fontWeight: 600 }}>
+                        {statusConfig.label}
+                    </span>
+                </p>
+                {tooth?.notes && (
+                    <p className="text-xs mt-1 leading-relaxed">
+                        {tooth.notes}
+                    </p>
+                )}
+                <p className="text-[11px] mt-2 opacity-80">
+                    FDI: {payload.notations.fdi} · Universal: {payload.notations.universal}
+                </p>
+            </div>
+        );
+    };
 
     return (
         <div className="space-y-5">
@@ -152,9 +235,22 @@ export default function DentalChartTab({ patient }) {
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
                     <div>
                         <h2 className="font-semibold text-text-primary">Interactive Dental Chart</h2>
-                        <p className="text-xs text-text-secondary">Click any tooth to update its status</p>
+                        <p className="text-xs text-text-secondary">
+                            {isMobile
+                                ? 'Tap any tooth to update its status. Mobile uses a compact layout for easier viewing.'
+                                : 'Click any tooth in the odontogram to update its status.'}
+                        </p>
                     </div>
-                    <div className="flex items-center gap-2 w-full sm:w-auto">
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
+                        <select
+                            className="form-input text-sm w-full sm:w-[160px]"
+                            value={notation}
+                            onChange={e => setNotation(e.target.value)}
+                        >
+                            {NOTATION_OPTIONS.map(option => (
+                                <option key={option} value={option}>{option} Notation</option>
+                            ))}
+                        </select>
                         <button className="btn-ghost text-xs" onClick={fetchChart} disabled={loading}>
                             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
                         </button>
@@ -174,55 +270,40 @@ export default function DentalChartTab({ patient }) {
                         <div className="text-text-secondary text-sm">Loading dental chart...</div>
                     </div>
                 ) : (
-                    <div className="overflow-x-auto">
-                        <div className="min-w-[700px]">
-                            {/* Direction labels */}
-                            <div className="flex justify-between px-10 mb-1">
+                    <div className="rounded-3xl border border-border/50 bg-gradient-to-b from-pink-50/60 via-white to-white p-3 sm:p-5 lg:p-6 overflow-x-auto">
+                        <div className={`${isMobile ? 'min-w-[520px]' : 'min-w-0'} mx-auto w-full`}>
+                            <div className={`flex justify-between ${isMobile ? 'px-2 pb-3' : 'px-6 pb-2'}`}>
                                 <span className="text-xs font-semibold text-text-secondary uppercase tracking-wider">Patient's Right</span>
                                 <span className="text-xs font-semibold text-text-secondary uppercase tracking-wider">Patient's Left</span>
                             </div>
-
-                            {/* Upper jaw */}
-                            <div className="relative">
-                                <div className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-primary/40 uppercase tracking-widest" style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg) translateY(50%)' }}>UPPER</div>
-                                <div className="bg-gradient-to-b from-pink-50/70 via-white to-white border border-border/50 rounded-t-3xl pt-4">
-                                    {renderArch(UPPER_TEETH, UPPER_CURVE, true)}
-                                </div>
-                            </div>
-
-                            {/* Jaw divider */}
-                            <div className="flex items-center gap-3 py-2 px-4">
-                                <div className="flex-1 border-t-2 border-dashed border-border" />
-                                <span className="text-[10px] text-text-secondary font-semibold px-2 uppercase tracking-widest">Jaw Line</span>
-                                <div className="flex-1 border-t-2 border-dashed border-border" />
-                            </div>
-
-                            {/* Lower jaw */}
-                            <div className="relative">
-                                <div className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-primary/40 uppercase tracking-widest" style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg) translateY(50%)' }}>LOWER</div>
-                                <div className="bg-gradient-to-t from-pink-50/70 via-white to-white border border-border/50 rounded-b-3xl pb-4">
-                                    {renderArch(LOWER_TEETH, LOWER_CURVE, false)}
-                                </div>
-                            </div>
+                            <Odontogram
+                                key={odontogramResetKey}
+                                singleSelect
+                                notation={notation}
+                                layout={odontogramLayout}
+                                defaultSelected={
+                                    selectedTooth && !selectedTooth.isExtra
+                                        ? [`teeth-${UNIVERSAL_TO_FDI[selectedTooth.number]}`]
+                                        : []
+                                }
+                                onChange={handleOdontogramChange}
+                                teethConditions={odontogramConditions}
+                                showLabels
+                                tooltip={{ placement: odontogramTooltipPlacement, content: renderTooltip }}
+                                className="w-full"
+                                colors={{
+                                    darkBlue: '#0a6352',
+                                    baseBlue: '#96b7af',
+                                    lightBlue: '#d9eee8',
+                                }}
+                                styles={{ maxWidth: odontogramMaxWidth }}
+                            />
+                            <p className="text-xs text-text-secondary mt-3 text-center">
+                                Healthy teeth use the default odontogram outline. Colored teeth indicate saved or unsaved chart conditions.
+                            </p>
                         </div>
                     </div>
                 )}
-
-                {/* Legend */}
-                <div className="mt-6 pt-4 border-t border-border">
-                    <p className="text-xs font-semibold text-text-secondary uppercase tracking-wide mb-3">Status Legend</p>
-                    <div className="flex flex-wrap gap-2">
-                        {TOOTH_STATUSES.map(s => (
-                            <span
-                                key={s.value}
-                                className="badge text-xs"
-                                style={{ backgroundColor: s.bg, color: s.text }}
-                            >
-                                {s.label}
-                            </span>
-                        ))}
-                    </div>
-                </div>
             </div>
 
             {/* Stats */}
@@ -265,7 +346,7 @@ export default function DentalChartTab({ patient }) {
                         No supernumerary teeth. Click "Add Extra Tooth" if the patient has more than 32 teeth.
                     </p>
                 ) : (
-                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                         {extraTeeth.map((et, i) => {
                             const cfg = TOOTH_STATUS_MAP[et.status] || TOOTH_STATUS_MAP.healthy;
                             const change = changes[et.tooth_number];
@@ -350,7 +431,10 @@ export default function DentalChartTab({ patient }) {
                 <ToothStatusModal
                     tooth={selectedTooth}
                     onSave={handleToothUpdate}
-                    onClose={() => setSelectedTooth(null)}
+                    onClose={() => {
+                        setSelectedTooth(null);
+                        setOdontogramResetKey(v => v + 1);
+                    }}
                 />
             )}
 

@@ -36,13 +36,13 @@ export default function ToothStatusModal({ tooth, onSave, onClose }) {
                 <p className="text-sm text-text-secondary">{subtitle}</p>
                 <div>
                     <label className="form-label">Status</label>
-                    <div className="grid grid-cols-2 gap-2 mt-1">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-1">
                         {TOOTH_STATUSES.map(s => (
                             <button
                                 key={s.value}
                                 type="button"
                                 onClick={() => setStatus(s.value)}
-                                className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium transition-all ${
+                                className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium text-left transition-all ${
                                     status === s.value
                                         ? 'border-primary ring-2 ring-primary/20'
                                         : 'border-border hover:border-primary/40'

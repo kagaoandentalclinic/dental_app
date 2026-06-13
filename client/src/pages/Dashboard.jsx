@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Users, Calendar, Clock, Banknote, Eye, AlertTriangle, TrendingUp, Plus, ArrowRight } from 'lucide-react';
+import { Users, Calendar, Clock, Eye, AlertTriangle, Plus, ArrowRight } from 'lucide-react';
 import client from '../api/client';
 import { formatDate, formatName, calcAge, formatCurrency } from '../utils/helpers';
+import RevenueSection from './RevenueSection';
 
 const fadeUp = (i) => ({
     initial: { opacity: 0, y: 18 },
@@ -11,14 +12,9 @@ const fadeUp = (i) => ({
     transition: { delay: i * 0.07, duration: 0.38, ease: [0.22, 1, 0.36, 1] },
 });
 
-const REVENUE_PERIODS = [
-    { value: 'day',    label: 'Today',   statLabel: "Today's Revenue"   },
-    { value: 'biweek', label: 'Bi-week', statLabel: 'Bi-weekly Revenue'  },
-    { value: 'month',  label: 'Month',   statLabel: 'Monthly Revenue'   },
-    { value: 'custom', label: 'Custom',  statLabel: 'Custom Range Revenue' },
-];
 
-// Stat card configurations
+
+// Stat card configurations (revenue moved to RevenueSection)
 const STAT_CARDS = [
     {
         key: 'totalPatients',
@@ -27,6 +23,8 @@ const STAT_CARDS = [
         iconBg: 'bg-teal-50',
         iconColor: 'text-teal-600',
         dot: 'bg-teal-500',
+        to: '/patients',
+        hint: 'View all patients',
     },
     {
         key: 'appointmentsToday',
@@ -35,132 +33,61 @@ const STAT_CARDS = [
         iconBg: 'bg-blue-50',
         iconColor: 'text-blue-600',
         dot: 'bg-blue-500',
+        to: '/appointments',
+        hint: 'View today\'s schedule',
     },
     {
         key: 'upcomingAppointments',
         icon: Clock,
-        label: 'Upcoming',
+        label: 'Upcoming (30d)',
         iconBg: 'bg-violet-50',
         iconColor: 'text-violet-600',
         dot: 'bg-violet-500',
+        to: '/appointments',
+        hint: 'View upcoming appointments',
     },
 ];
 
-function StatCard({ icon: Icon, label, value, iconBg, iconColor, dot, index }) {
+function StatCard({ icon: Icon, label, value, iconBg, iconColor, dot, to, hint, index }) {
     return (
         <motion.div
             {...fadeUp(index)}
-            className="stat-card group"
+            className="stat-card group cursor-pointer"
         >
-            {/* Icon circle */}
-            <div className={`stat-icon ${iconBg} ${iconColor}`}>
-                <Icon className="w-5 h-5" />
-            </div>
-            <div className="min-w-0">
-                <p className="stat-label">{label}</p>
-                <p className="stat-value">
-                    {value ?? (
-                        <span className="skeleton inline-block w-12 h-6 rounded" />
-                    )}
-                </p>
-            </div>
-            {/* Subtle indicator dot */}
-            <div className={`ml-auto w-2 h-2 rounded-full ${dot} opacity-60 animate-pulse-dot`} />
-        </motion.div>
-    );
-}
-
-function RevenueCard({ label, value, revenuePeriod, onPeriodChange, dateFrom, dateTo, onDateChange, index }) {
-    const isCustom = revenuePeriod === 'custom';
-    const today = new Date().toISOString().slice(0, 10);
-
-    // Human-readable range label
-    const rangeLabel = isCustom && dateFrom && dateTo
-        ? `${dateFrom} → ${dateTo}`
-        : null;
-
-    return (
-        <motion.div {...fadeUp(index)} className="stat-card flex-col items-start gap-3">
-            <div className="flex items-center gap-4 w-full">
-                <div className="stat-icon bg-emerald-50 text-emerald-600">
-                    <Banknote className="w-5 h-5" />
+            <Link
+                to={to}
+                className="flex items-center gap-4 w-full no-underline"
+            >
+                {/* Icon circle */}
+                <div className={`stat-icon ${iconBg} ${iconColor} transition-transform duration-200 group-hover:scale-110`}>
+                    <Icon className="w-5 h-5" />
                 </div>
                 <div className="min-w-0 flex-1">
                     <p className="stat-label">{label}</p>
                     <p className="stat-value">
                         {value ?? (
-                            <span className="skeleton inline-block w-20 h-6 rounded" />
+                            <span className="skeleton inline-block w-12 h-6 rounded" />
                         )}
                     </p>
-                    {rangeLabel && (
-                        <p className="text-[10px] text-slate-400 mt-0.5 truncate">{rangeLabel}</p>
-                    )}
+                    {/* Hint text slides up on hover */}
+                    <p className="text-[11px] text-slate-400 font-medium mt-0.5
+                                  translate-y-1 opacity-0 group-hover:translate-y-0 group-hover:opacity-100
+                                  transition-all duration-200">
+                        {hint}
+                    </p>
                 </div>
-                <TrendingUp className="w-4 h-4 text-emerald-400 ml-auto shrink-0" />
-            </div>
-
-            {/* Period toggle */}
-            <div className="w-full grid grid-cols-4 bg-slate-100 rounded-xl p-0.5 text-xs font-semibold">
-                {REVENUE_PERIODS.map(period => (
-                    <button
-                        key={period.value}
-                        type="button"
-                        className={`py-1.5 rounded-[10px] transition-all duration-200 ${
-                            revenuePeriod === period.value
-                                ? 'bg-white text-primary shadow-sm'
-                                : 'text-slate-400 hover:text-slate-600'
-                        }`}
-                        onClick={() => onPeriodChange(period.value)}
-                    >
-                        {period.label}
-                    </button>
-                ))}
-            </div>
-
-            {/* Custom date range inputs — visible only when Custom is selected */}
-            {isCustom && (
-                <div className="w-full space-y-2">
-                    <div className="grid grid-cols-2 gap-2">
-                        <div>
-                            <label className="block text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-1">
-                                From
-                            </label>
-                            <input
-                                type="date"
-                                max={dateTo || today}
-                                value={dateFrom}
-                                onChange={e => onDateChange('from', e.target.value)}
-                                className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg
-                                           text-text-primary focus:outline-none focus:border-primary
-                                           focus:ring-2 focus:ring-primary/15 bg-white"
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-1">
-                                To
-                            </label>
-                            <input
-                                type="date"
-                                min={dateFrom || undefined}
-                                max={today}
-                                value={dateTo}
-                                onChange={e => onDateChange('to', e.target.value)}
-                                className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg
-                                           text-text-primary focus:outline-none focus:border-primary
-                                           focus:ring-2 focus:ring-primary/15 bg-white"
-                            />
-                        </div>
-                    </div>
-                    {(!dateFrom || !dateTo) && (
-                        <p className="text-[10px] text-amber-500 flex items-center gap-1">
-                            <span>⚠</span> Select both dates to load revenue
-                        </p>
-                    )}
-                </div>
-            )}
+                {/* Arrow slides in on hover */}
+                <ArrowRight
+                    className="w-4 h-4 text-slate-300 shrink-0
+                               -translate-x-1 opacity-0 group-hover:translate-x-0 group-hover:opacity-100
+                               transition-all duration-200"
+                />
+            </Link>
         </motion.div>
     );
 }
+
+
 
 function PatientAvatar({ patient }) {
     if (patient.profile_photo) {
@@ -204,39 +131,20 @@ function SkeletonRow({ cols = 5 }) {
 export default function Dashboard() {
     const [stats, setStats] = useState(null);
     const [loading, setLoading] = useState(true);
-    const [revenuePeriod, setRevenuePeriod] = useState('month');
-    const [dateFrom, setDateFrom] = useState('');
-    const [dateTo, setDateTo] = useState('');
-
-    const revenueMeta = REVENUE_PERIODS.find(p => p.value === revenuePeriod) || REVENUE_PERIODS[2];
-
-    // Handle date range changes
-    const handleDateChange = (field, value) => {
-        if (field === 'from') setDateFrom(value);
-        else setDateTo(value);
-    };
 
     useEffect(() => {
-        // Don't fetch if custom mode is selected but dates aren't filled in
-        if (revenuePeriod === 'custom' && (!dateFrom || !dateTo)) return;
-
         let cancelled = false;
         setLoading(true);
         (async () => {
             try {
-                const params = { revenuePeriod };
-                if (revenuePeriod === 'custom') {
-                    params.dateFrom = dateFrom;
-                    params.dateTo   = dateTo;
-                }
-                const res = await client.get('/dashboard/stats', { params });
+                const res = await client.get('/dashboard/stats');
                 if (!cancelled) setStats(res.data);
             } finally {
                 if (!cancelled) setLoading(false);
             }
         })();
         return () => { cancelled = true; };
-    }, [revenuePeriod, dateFrom, dateTo]);
+    }, []);
 
     return (
         <div className="space-y-6 animate-fade-up">
@@ -270,8 +178,8 @@ export default function Dashboard() {
                 </div>
             </div>
 
-            {/* ── Stat Cards ── */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {/* ── Stat Cards (3 summary metrics) ── */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 {STAT_CARDS.map((cfg, i) => (
                     <StatCard
                         key={cfg.key}
@@ -282,23 +190,14 @@ export default function Dashboard() {
                         iconBg={cfg.iconBg}
                         iconColor={cfg.iconColor}
                         dot={cfg.dot}
+                        to={cfg.to}
+                        hint={cfg.hint}
                     />
                 ))}
-                <RevenueCard
-                    index={3}
-                    label={revenueMeta.statLabel}
-                    value={stats ? formatCurrency(stats.monthlyRevenue) : null}
-                    revenuePeriod={revenuePeriod}
-                    onPeriodChange={(p) => {
-                        setRevenuePeriod(p);
-                        // Reset custom dates when switching away from custom
-                        if (p !== 'custom') { setDateFrom(''); setDateTo(''); }
-                    }}
-                    dateFrom={dateFrom}
-                    dateTo={dateTo}
-                    onDateChange={handleDateChange}
-                />
             </div>
+
+            {/* ── Revenue Overview Section ── */}
+            <RevenueSection />
 
             {/* ── Tables Row ── */}
             <div className="grid grid-cols-1 gap-5">

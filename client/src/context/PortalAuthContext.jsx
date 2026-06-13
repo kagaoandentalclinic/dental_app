@@ -57,6 +57,20 @@ export function PortalAuthProvider({ children }) {
         return res.data;
     }, []);
 
+    const requestPasswordReset = useCallback(async (email) => {
+        const res = await portalClient.post('/portal/request-password-reset', { email });
+        return res.data;
+    }, []);
+
+    const resetPassword = useCallback(async (token, password, confirmPassword) => {
+        const res = await portalClient.post('/portal/reset-password', {
+            token,
+            password,
+            confirm_password: confirmPassword,
+        });
+        return res.data;
+    }, []);
+
     const loginWithGoogle = useCallback(async (credential) => {
         const res = await portalClient.post('/portal/google', { credential });
         storePortalToken(res.data.token);
@@ -76,7 +90,7 @@ export function PortalAuthProvider({ children }) {
     }, []);
 
     return (
-        <PortalAuthContext.Provider value={{ patient, loading, login, register, verifyEmail, resendVerification, loginWithGoogle, logout, fetchMe: refreshPatient }}>
+        <PortalAuthContext.Provider value={{ patient, loading, login, register, verifyEmail, resendVerification, requestPasswordReset, resetPassword, loginWithGoogle, logout, fetchMe: refreshPatient }}>
             {children}
         </PortalAuthContext.Provider>
     );

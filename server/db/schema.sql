@@ -51,6 +51,8 @@ CREATE TABLE IF NOT EXISTS patients (
   portal_email_verified BOOLEAN DEFAULT false,
   portal_email_verification_token_hash VARCHAR(255),
   portal_email_verification_sent_at TIMESTAMPTZ,
+  portal_password_reset_token_hash VARCHAR(255),
+  portal_password_reset_sent_at TIMESTAMPTZ,
   portal_google_sub VARCHAR(255),
   portal_registered_at TIMESTAMPTZ,
   portal_last_login TIMESTAMPTZ,
@@ -68,6 +70,8 @@ ALTER TABLE patients ADD COLUMN IF NOT EXISTS portal_password_hash VARCHAR(255);
 ALTER TABLE patients ADD COLUMN IF NOT EXISTS portal_email_verified BOOLEAN DEFAULT false;
 ALTER TABLE patients ADD COLUMN IF NOT EXISTS portal_email_verification_token_hash VARCHAR(255);
 ALTER TABLE patients ADD COLUMN IF NOT EXISTS portal_email_verification_sent_at TIMESTAMPTZ;
+ALTER TABLE patients ADD COLUMN IF NOT EXISTS portal_password_reset_token_hash VARCHAR(255);
+ALTER TABLE patients ADD COLUMN IF NOT EXISTS portal_password_reset_sent_at TIMESTAMPTZ;
 ALTER TABLE patients ADD COLUMN IF NOT EXISTS portal_google_sub VARCHAR(255);
 ALTER TABLE patients ADD COLUMN IF NOT EXISTS portal_registered_at TIMESTAMPTZ;
 ALTER TABLE patients ADD COLUMN IF NOT EXISTS portal_last_login TIMESTAMPTZ;

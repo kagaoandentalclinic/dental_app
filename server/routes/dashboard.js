@@ -154,4 +154,360 @@ router.get('/stats', verifyToken, async (req, res) => {
     }
 });
 
+// ── GET /api/dashboard/revenue ──────────────────────────────────────────────
+// Returns all data needed by the Revenue Overview Section.
+router.get('/revenue', verifyToken, async (req, res) => {
+    try {
+        // Validate period param: 3m | 6m | 1y | custom
+        const allowedTrend = ['3m', '6m', '1y', 'custom'];
+        const trend = allowedTrend.includes(req.query.trend) ? req.query.trend : '6m';
+        const trendMonths = trend === '3m' ? 3 : trend === '1y' ? 12 : 6;
+
+        // Custom date range validation (YYYY-MM-DD)
+        let customFrom = null;
+        let customTo   = null;
+        if (trend === 'custom') {
+            const dateRe = /^\d{4}-\d{2}-\d{2}$/;
+            const rawFrom = req.query.dateFrom;
+            const rawTo   = req.query.dateTo;
+            if (rawFrom && dateRe.test(rawFrom) && rawTo && dateRe.test(rawTo)) {
+                customFrom = rawFrom;
+                // Make dateTo inclusive by advancing 1 day for the < bound
+                const endDate = new Date(rawTo);
+                endDate.setDate(endDate.getDate() + 1);
+                customTo = endDate.toISOString().slice(0, 10);
+            } else {
+                // Custom mode but dates missing/invalid — return empty trend
+                return res.json({
+                    thisMonth: 0, lastMonth: 0, lastMonthName: '',
+                    outstanding: 0, outstandingPatientCount: 0, collectionRate: 0,
+                    trend: [], services: {}, topOutstanding: [],
+                });
+            }
+        }
+
+        // ── Revenue helpers using visits + ortho tables ────────────────
+        // Collected revenue = paid + insurance visits + partial (50%) + ortho downpayments + ortho adjustments
+        // Outstanding = pending + partial (50%) + active ortho balance
+
+        const [
+            thisMonthVisitRes,
+            lastMonthVisitRes,
+            thisMonthOrthoRes,
+            lastMonthOrthoRes,
+            outstandingVisitRes,
+            outstandingOrthoRes,
+            trendRes,
+            serviceRes,
+            topOutstandingRes,
+        ] = await Promise.all([
+
+            // ── This month collected (visits) ──────────────────────────
+            pool.query(`
+                SELECT COALESCE(SUM(
+                    CASE
+                        WHEN payment_status = 'partial' THEN COALESCE(cost, 0) * 0.5
+                        ELSE COALESCE(cost, 0)
+                    END
+                ), 0) AS total
+                FROM visits v
+                JOIN patients p ON p.id = v.patient_id AND p.is_active = true
+                WHERE v.payment_status IN ('paid', 'insurance', 'partial')
+                  AND date_trunc('month', v.visit_date) = date_trunc('month', CURRENT_DATE)
+            `),
+
+            // ── Last month collected (visits) ──────────────────────────
+            pool.query(`
+                SELECT COALESCE(SUM(
+                    CASE
+                        WHEN payment_status = 'partial' THEN COALESCE(cost, 0) * 0.5
+                        ELSE COALESCE(cost, 0)
+                    END
+                ), 0) AS total
+                FROM visits v
+                JOIN patients p ON p.id = v.patient_id AND p.is_active = true
+                WHERE v.payment_status IN ('paid', 'insurance', 'partial')
+                  AND date_trunc('month', v.visit_date) = date_trunc('month', CURRENT_DATE - INTERVAL '1 month')
+            `),
+
+            // ── This month ortho (downpayments + adjustments) ──────────
+            pool.query(`
+                SELECT
+                    (
+                        SELECT COALESCE(SUM(oc.downpayment), 0)
+                        FROM orthodontic_cases oc
+                        JOIN patients p ON p.id = oc.patient_id AND p.is_active = true
+                        WHERE date_trunc('month', oc.start_date::timestamptz) = date_trunc('month', CURRENT_DATE)
+                    ) +
+                    (
+                        SELECT COALESCE(SUM(oa.amount_paid), 0)
+                        FROM orthodontic_adjustments oa
+                        JOIN patients p ON p.id = oa.patient_id AND p.is_active = true
+                        WHERE date_trunc('month', oa.adjustment_date::timestamptz) = date_trunc('month', CURRENT_DATE)
+                    ) AS total
+            `),
+
+            // ── Last month ortho ───────────────────────────────────────
+            pool.query(`
+                SELECT
+                    (
+                        SELECT COALESCE(SUM(oc.downpayment), 0)
+                        FROM orthodontic_cases oc
+                        JOIN patients p ON p.id = oc.patient_id AND p.is_active = true
+                        WHERE date_trunc('month', oc.start_date::timestamptz) = date_trunc('month', CURRENT_DATE - INTERVAL '1 month')
+                    ) +
+                    (
+                        SELECT COALESCE(SUM(oa.amount_paid), 0)
+                        FROM orthodontic_adjustments oa
+                        JOIN patients p ON p.id = oa.patient_id AND p.is_active = true
+                        WHERE date_trunc('month', oa.adjustment_date::timestamptz) = date_trunc('month', CURRENT_DATE - INTERVAL '1 month')
+                    ) AS total
+            `),
+
+            // ── Outstanding visits ─────────────────────────────────────
+            pool.query(`
+                SELECT
+                    COALESCE(SUM(
+                        CASE
+                            WHEN v.payment_status = 'partial' THEN COALESCE(v.cost, 0) * 0.5
+                            ELSE COALESCE(v.cost, 0)
+                        END
+                    ), 0) AS total,
+                    COUNT(DISTINCT v.patient_id) AS patient_count
+                FROM visits v
+                JOIN patients p ON p.id = v.patient_id AND p.is_active = true
+                WHERE v.payment_status IN ('pending', 'partial')
+            `),
+
+            // ── Outstanding ortho balances ─────────────────────────────
+            pool.query(`
+                SELECT
+                    COALESCE(SUM(oc.total_cost - oc.total_paid), 0) AS total,
+                    COUNT(DISTINCT oc.patient_id) AS patient_count
+                FROM orthodontic_cases oc
+                JOIN patients p ON p.id = oc.patient_id AND p.is_active = true
+                WHERE oc.status = 'active' AND oc.total_paid < oc.total_cost
+            `),
+
+            // ── Revenue trend (per month) ──────────────────────────────
+            trend === 'custom'
+                ? pool.query(`
+                    WITH months AS (
+                        SELECT generate_series(
+                            date_trunc('month', $1::date),
+                            date_trunc('month', ($2::date - INTERVAL '1 day')),
+                            '1 month'
+                        ) AS month_start
+                    ),
+                    visit_data AS (
+                        SELECT
+                            date_trunc('month', v.visit_date) AS month_start,
+                            SUM(CASE
+                                WHEN v.payment_status = 'partial' THEN COALESCE(v.cost, 0) * 0.5
+                                ELSE COALESCE(v.cost, 0)
+                            END) FILTER (WHERE v.payment_status IN ('paid','insurance','partial')) AS collected,
+                            SUM(CASE
+                                WHEN v.payment_status = 'partial' THEN COALESCE(v.cost, 0) * 0.5
+                                ELSE COALESCE(v.cost, 0)
+                            END) FILTER (WHERE v.payment_status IN ('pending','partial')) AS outstanding
+                        FROM visits v
+                        JOIN patients p ON p.id = v.patient_id AND p.is_active = true
+                        WHERE v.visit_date >= $1::timestamptz
+                          AND v.visit_date <  $2::timestamptz
+                        GROUP BY 1
+                    ),
+                    ortho_data AS (
+                        SELECT
+                            date_trunc('month', oa.adjustment_date::timestamptz) AS month_start,
+                            SUM(COALESCE(oa.amount_paid, 0)) AS collected,
+                            0 AS outstanding
+                        FROM orthodontic_adjustments oa
+                        JOIN patients p ON p.id = oa.patient_id AND p.is_active = true
+                        WHERE oa.adjustment_date >= $1::date
+                          AND oa.adjustment_date <  $2::date
+                        GROUP BY 1
+                    )
+                    SELECT
+                        to_char(m.month_start, 'Mon YYYY') AS month_label,
+                        m.month_start,
+                        COALESCE(vd.collected, 0) + COALESCE(od.collected, 0) AS collected,
+                        COALESCE(vd.outstanding, 0) AS outstanding
+                    FROM months m
+                    LEFT JOIN visit_data vd ON vd.month_start = m.month_start
+                    LEFT JOIN ortho_data od ON od.month_start = m.month_start
+                    ORDER BY m.month_start ASC
+                `, [customFrom, customTo])
+                : pool.query(`
+                    WITH months AS (
+                        SELECT generate_series(
+                            date_trunc('month', CURRENT_DATE - ($1 || ' months')::interval),
+                            date_trunc('month', CURRENT_DATE),
+                            '1 month'
+                        ) AS month_start
+                    ),
+                    visit_data AS (
+                        SELECT
+                            date_trunc('month', v.visit_date) AS month_start,
+                            SUM(CASE
+                                WHEN v.payment_status = 'partial' THEN COALESCE(v.cost, 0) * 0.5
+                                ELSE COALESCE(v.cost, 0)
+                            END) FILTER (WHERE v.payment_status IN ('paid','insurance','partial')) AS collected,
+                            SUM(CASE
+                                WHEN v.payment_status = 'partial' THEN COALESCE(v.cost, 0) * 0.5
+                                ELSE COALESCE(v.cost, 0)
+                            END) FILTER (WHERE v.payment_status IN ('pending','partial')) AS outstanding
+                        FROM visits v
+                        JOIN patients p ON p.id = v.patient_id AND p.is_active = true
+                        WHERE v.visit_date >= date_trunc('month', CURRENT_DATE - ($1 || ' months')::interval)
+                        GROUP BY 1
+                    ),
+                    ortho_data AS (
+                        SELECT
+                            date_trunc('month', oa.adjustment_date::timestamptz) AS month_start,
+                            SUM(COALESCE(oa.amount_paid, 0)) AS collected,
+                            0 AS outstanding
+                        FROM orthodontic_adjustments oa
+                        JOIN patients p ON p.id = oa.patient_id AND p.is_active = true
+                        WHERE oa.adjustment_date >= (CURRENT_DATE - ($1 || ' months')::interval)::date
+                        GROUP BY 1
+                    )
+                    SELECT
+                        to_char(m.month_start, 'Mon') AS month_label,
+                        m.month_start,
+                        COALESCE(vd.collected, 0) + COALESCE(od.collected, 0) AS collected,
+                        COALESCE(vd.outstanding, 0) AS outstanding
+                    FROM months m
+                    LEFT JOIN visit_data vd ON vd.month_start = m.month_start
+                    LEFT JOIN ortho_data od ON od.month_start = m.month_start
+                    ORDER BY m.month_start ASC
+                `, [trendMonths]),
+
+            // ── Service breakdown (this month, grouped by visit_type) ──
+            pool.query(`
+                SELECT
+                    LOWER(TRIM(v.visit_type)) AS visit_type,
+                    COALESCE(SUM(
+                        CASE
+                            WHEN v.payment_status = 'partial' THEN COALESCE(v.cost, 0) * 0.5
+                            ELSE COALESCE(v.cost, 0)
+                        END
+                    ), 0) AS total
+                FROM visits v
+                JOIN patients p ON p.id = v.patient_id AND p.is_active = true
+                WHERE date_trunc('month', v.visit_date) = date_trunc('month', CURRENT_DATE)
+                  AND v.payment_status IN ('paid', 'insurance', 'partial')
+                GROUP BY LOWER(TRIM(v.visit_type))
+                ORDER BY total DESC
+            `),
+
+            // ── Top 5 outstanding patients ─────────────────────────────
+            pool.query(`
+                WITH outstanding AS (
+                    SELECT
+                        p.id, p.last_name, p.first_name, p.profile_photo,
+                        COALESCE(SUM(
+                            CASE
+                                WHEN v.payment_status = 'partial' THEN COALESCE(v.cost, 0) * 0.5
+                                ELSE COALESCE(v.cost, 0)
+                            END
+                        ), 0) AS amount,
+                        MAX(v.visit_date::date) AS last_visit
+                    FROM visits v
+                    JOIN patients p ON p.id = v.patient_id AND p.is_active = true
+                    WHERE v.payment_status IN ('pending', 'partial')
+                    GROUP BY p.id, p.last_name, p.first_name, p.profile_photo
+
+                    UNION ALL
+
+                    SELECT
+                        p.id, p.last_name, p.first_name, p.profile_photo,
+                        (oc.total_cost - oc.total_paid) AS amount,
+                        oc.updated_at::date AS last_visit
+                    FROM orthodontic_cases oc
+                    JOIN patients p ON p.id = oc.patient_id AND p.is_active = true
+                    WHERE oc.status = 'active' AND oc.total_paid < oc.total_cost
+                )
+                SELECT
+                    id, last_name, first_name, profile_photo,
+                    SUM(amount) AS outstanding_amount,
+                    MAX(last_visit) AS last_visit
+                FROM outstanding
+                GROUP BY id, last_name, first_name, profile_photo
+                ORDER BY outstanding_amount DESC
+                LIMIT 5
+            `),
+        ]);
+
+        // ── Aggregate collected/outstanding totals ──────────────────────
+        const thisMonthCollected =
+            parseFloat(thisMonthVisitRes.rows[0].total) +
+            parseFloat(thisMonthOrthoRes.rows[0].total);
+        const lastMonthCollected =
+            parseFloat(lastMonthVisitRes.rows[0].total) +
+            parseFloat(lastMonthOrthoRes.rows[0].total);
+
+        const outstandingTotal =
+            parseFloat(outstandingVisitRes.rows[0].total) +
+            parseFloat(outstandingOrthoRes.rows[0].total);
+
+        const outstandingPatientCount =
+            parseInt(outstandingVisitRes.rows[0].patient_count) +
+            parseInt(outstandingOrthoRes.rows[0].patient_count);
+
+        // Collection rate = collected / (collected + outstanding) * 100
+        const totalBilled = thisMonthCollected + outstandingTotal;
+        const collectionRate = totalBilled > 0
+            ? Math.round((thisMonthCollected / totalBilled) * 100)
+            : 0;
+
+        // ── Service breakdown — map visit_type to 6 categories ──────────
+        const SERVICE_MAP = {
+            orthodontics: ['orthodontics', 'ortho', 'braces', 'retainer'],
+            restorations: ['restoration', 'filling', 'composite', 'amalgam', 'crown', 'veneer', 'onlay', 'inlay'],
+            extractions: ['extraction', 'surgery', 'oral surgery', 'tooth removal'],
+            cleaning: ['cleaning', 'prophylaxis', 'prophy', 'scaling', 'polishing', 'teeth cleaning'],
+            consultations: ['consultation', 'checkup', 'check-up', 'exam', 'examination', 'x-ray', 'xray', 'radiograph'],
+        };
+
+        const serviceBreakdown = { orthodontics: 0, restorations: 0, extractions: 0, cleaning: 0, consultations: 0, others: 0 };
+
+        for (const row of serviceRes.rows) {
+            const type = (row.visit_type || '').toLowerCase();
+            let matched = false;
+            for (const [category, keywords] of Object.entries(SERVICE_MAP)) {
+                if (keywords.some(kw => type.includes(kw))) {
+                    serviceBreakdown[category] += parseFloat(row.total);
+                    matched = true;
+                    break;
+                }
+            }
+            if (!matched) serviceBreakdown.others += parseFloat(row.total);
+        }
+
+        // Get last month name
+        const lastMonthDate = new Date();
+        lastMonthDate.setMonth(lastMonthDate.getMonth() - 1);
+        const lastMonthName = lastMonthDate.toLocaleString('en-US', { month: 'long' });
+
+        res.json({
+            thisMonth: thisMonthCollected,
+            lastMonth: lastMonthCollected,
+            lastMonthName,
+            outstanding: outstandingTotal,
+            outstandingPatientCount,
+            collectionRate,
+            trend: trendRes.rows.map(r => ({
+                label: r.month_label,
+                collected: parseFloat(r.collected),
+                outstanding: parseFloat(r.outstanding),
+            })),
+            services: serviceBreakdown,
+            topOutstanding: topOutstandingRes.rows,
+        });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
 module.exports = router;

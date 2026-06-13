@@ -8,11 +8,12 @@ const { verifyPortalPatient } = require('../middleware/portalAuth');
 const { signPortalToken } = require('../utils/jwt');
 const { logAudit } = require('../utils/auditLogs');
 const logger = require('../utils/logger');
-const { sendPortalVerificationEmail } = require('../utils/portalEmail');
+const { sendPortalPasswordResetEmail, sendPortalVerificationEmail } = require('../utils/portalEmail');
 const { verifyGoogleIdToken } = require('../utils/googleAuth');
 const { buildClinicAppointmentDateTime } = require('../utils/appointmentDate');
 
 const VERIFICATION_WINDOW_HOURS = 48;
+const PASSWORD_RESET_WINDOW_HOURS = 2;
 
 function normalizeEmail(email) {
     return String(email || '').trim().toLowerCase();
@@ -20,6 +21,12 @@ function normalizeEmail(email) {
 
 function normalizePhone(phone) {
     return String(phone || '').trim();
+}
+
+function isSundayBookingDate(preferredDate) {
+    const value = String(preferredDate || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+    return new Date(`${value}T12:00:00Z`).getUTCDay() === 0;
 }
 
 function hashVerificationToken(token) {
@@ -108,6 +115,19 @@ async function findPortalPatientByVerificationToken(db, rawToken) {
            AND is_active = true
          LIMIT 1`,
         [hashVerificationToken(rawToken), `${VERIFICATION_WINDOW_HOURS} hours`]
+    );
+    return result.rows[0] || null;
+}
+
+async function findPortalPatientByPasswordResetToken(db, rawToken) {
+    const result = await db.query(
+        `SELECT id
+         FROM patients
+         WHERE portal_password_reset_token_hash = $1
+           AND portal_password_reset_sent_at >= NOW() - $2::interval
+           AND is_active = true
+         LIMIT 1`,
+        [hashVerificationToken(rawToken), `${PASSWORD_RESET_WINDOW_HOURS} hours`]
     );
     return result.rows[0] || null;
 }
@@ -216,6 +236,19 @@ async function sendVerificationForPatient(detail, rawToken) {
     }
 }
 
+async function sendPasswordResetForPatient(detail, rawToken) {
+    try {
+        return await sendPortalPasswordResetEmail({
+            to: detail.portal_email,
+            firstName: detail.first_name,
+            token: rawToken,
+        });
+    } catch (err) {
+        logger.error('Failed to send portal password reset email', err, { patientId: detail.id, email: detail.portal_email });
+        throw err;
+    }
+}
+
 async function issueVerificationRequiredResponse(res, detail, rawToken, fallbackMessage) {
     const delivery = await sendVerificationForPatient(detail, rawToken);
     return res.status(201).json({
@@ -251,6 +284,7 @@ router.post('/register',
         const { rawToken, tokenHash } = createVerificationToken();
 
         const db = await pool.connect();
+        let committed = false;
         try {
             await db.query('BEGIN');
 
@@ -324,9 +358,12 @@ router.post('/register',
             });
 
             await db.query('COMMIT');
+            committed = true;
             return issueVerificationRequiredResponse(res, afterDetail, rawToken);
         } catch (err) {
-            await db.query('ROLLBACK');
+            if (!committed) {
+                await db.query('ROLLBACK');
+            }
             logger.error('Failed to register portal account', err, { email });
             return res.status(500).json({ error: 'Failed to register portal account' });
         } finally {
@@ -343,6 +380,7 @@ router.post('/resend-verification',
 
         const email = normalizeEmail(req.body.email);
         const db = await pool.connect();
+        let committed = false;
         try {
             await db.query('BEGIN');
             const patient = await findPortalPatientByEmail(db, email);
@@ -362,6 +400,7 @@ router.post('/resend-verification',
             );
             const detail = await getPortalPatientDetail(db, patient.id);
             await db.query('COMMIT');
+            committed = true;
 
             const delivery = await sendVerificationForPatient(detail, rawToken);
             return res.json({
@@ -372,7 +411,9 @@ router.post('/resend-verification',
                 preview_link: delivery.previewLink,
             });
         } catch (err) {
-            await db.query('ROLLBACK');
+            if (!committed) {
+                await db.query('ROLLBACK');
+            }
             logger.error('Failed to resend portal verification email', err, { email });
             return res.status(500).json({ error: 'Failed to resend confirmation email' });
         } finally {
@@ -427,6 +468,130 @@ router.post('/verify-email',
             await db.query('ROLLBACK');
             logger.error('Failed to verify portal email', err, { patientId: matched.id });
             return res.status(500).json({ error: 'Failed to confirm email' });
+        } finally {
+            db.release();
+        }
+    }
+);
+
+router.post('/request-password-reset',
+    body('email').isEmail(),
+    async (req, res) => {
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
+        const email = normalizeEmail(req.body.email);
+        const genericResponse = {
+            message: 'If that portal account exists, a password reset link has been sent.',
+        };
+        const db = await pool.connect();
+        let committed = false;
+
+        try {
+            await db.query('BEGIN');
+            const patient = await findPortalPatientByEmail(db, email);
+            if (!patient || !patient.portal_password_hash || !patient.portal_email_verified) {
+                await db.query('ROLLBACK');
+                return res.json(genericResponse);
+            }
+
+            const { rawToken, tokenHash } = createVerificationToken();
+            await db.query(
+                `UPDATE patients
+                 SET portal_password_reset_token_hash = $1,
+                     portal_password_reset_sent_at = NOW(),
+                     updated_at = NOW()
+                 WHERE id = $2`,
+                [tokenHash, patient.id]
+            );
+            const detail = await getPortalPatientDetail(db, patient.id);
+            await logAudit(db, {
+                actorRole: 'portal_patient',
+                entityType: 'patient',
+                entityId: patient.id,
+                patientId: patient.id,
+                action: 'portal.request_password_reset',
+                afterData: {
+                    portal_password_reset_sent_at: new Date().toISOString(),
+                },
+                metadata: { source: 'patient_portal' },
+            });
+            await db.query('COMMIT');
+            committed = true;
+
+            const delivery = await sendPasswordResetForPatient(detail, rawToken);
+            return res.json({
+                message: delivery.sent
+                    ? genericResponse.message
+                    : 'Email delivery is not configured yet, so use the preview reset link below.',
+                delivery_mode: delivery.mode,
+                preview_link: delivery.previewLink,
+            });
+        } catch (err) {
+            if (!committed) {
+                await db.query('ROLLBACK');
+            }
+            logger.error('Failed to request portal password reset', err, { email });
+            return res.status(500).json({ error: 'Failed to request password reset' });
+        } finally {
+            db.release();
+        }
+    }
+);
+
+router.post('/reset-password',
+    body('token').trim().notEmpty(),
+    body('password').isLength({ min: 6 }),
+    body('confirm_password').custom((value, { req }) => value === req.body.password),
+    async (req, res) => {
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+        if (String(req.body.confirm_password || '') !== String(req.body.password || '')) {
+            return res.status(400).json({ error: 'Passwords do not match.' });
+        }
+
+        const token = String(req.body.token || '').trim();
+        const matched = await findPortalPatientByPasswordResetToken(pool, token);
+        if (!matched) {
+            return res.status(400).json({ error: 'That password reset link is invalid or has expired.' });
+        }
+
+        const passwordHash = await bcrypt.hash(req.body.password, 10);
+        const db = await pool.connect();
+        try {
+            await db.query('BEGIN');
+            const beforeDetail = await getPortalPatientDetail(db, matched.id);
+
+            await db.query(
+                `UPDATE patients
+                 SET portal_password_hash = $1,
+                     portal_password_reset_token_hash = NULL,
+                     portal_password_reset_sent_at = NULL,
+                     updated_at = NOW()
+                 WHERE id = $2`,
+                [passwordHash, matched.id]
+            );
+
+            const afterDetail = await getPortalPatientDetail(db, matched.id);
+            await logAudit(db, {
+                actorRole: 'portal_patient',
+                entityType: 'patient',
+                entityId: matched.id,
+                patientId: matched.id,
+                action: 'portal.reset_password',
+                beforeData: beforeDetail,
+                afterData: afterDetail,
+                metadata: { source: 'patient_portal' },
+            });
+
+            await db.query('COMMIT');
+            return res.json({
+                message: 'Your password has been updated. You can sign in now.',
+            });
+        } catch (err) {
+            await db.query('ROLLBACK');
+            logger.error('Failed to reset portal password', err, { patientId: matched.id });
+            return res.status(500).json({ error: 'Failed to reset password' });
         } finally {
             db.release();
         }
@@ -656,10 +821,36 @@ router.get('/history', verifyPortalPatient, async (req, res) => {
     }
 });
 
+router.get('/booked-times', verifyPortalPatient, async (req, res) => {
+    const { start, end } = req.query;
+    if (!start || !end) {
+        return res.status(400).json({ error: 'start and end are required' });
+    }
+
+    try {
+        const result = await pool.query(
+            `SELECT appointment_date, duration_minutes
+             FROM appointments
+             WHERE appointment_date >= $1
+               AND appointment_date <= $2
+               AND status != 'cancelled'
+             ORDER BY appointment_date`,
+            [start, end]
+        );
+        res.json(result.rows);
+    } catch (err) {
+        logger.error('Failed to load portal booked times', err, { patientId: req.portalPatient.patient_id });
+        res.status(500).json({ error: 'Failed to load booked times' });
+    }
+});
+
 router.post('/book', verifyPortalPatient, async (req, res) => {
-    const { preferred_date, preferred_time, service, notes } = req.body;
+    const { preferred_date, preferred_time, duration_minutes, service, notes } = req.body;
     if (!preferred_date || !preferred_time || !service) {
         return res.status(400).json({ error: 'Preferred date, time, and service are required.' });
+    }
+    if (isSundayBookingDate(preferred_date)) {
+        return res.status(400).json({ error: 'Sunday bookings are unavailable. Please choose Monday to Saturday.' });
     }
 
     const appointmentDate = buildClinicAppointmentDateTime(preferred_date, preferred_time);
@@ -667,13 +858,19 @@ router.post('/book', verifyPortalPatient, async (req, res) => {
         return res.status(400).json({ error: 'Invalid appointment date or time.' });
     }
 
+    const requestedDuration = Number(duration_minutes || 60);
+    if (![30, 60].includes(requestedDuration)) {
+        return res.status(400).json({ error: 'Appointment duration must be 30 minutes or 1 hour.' });
+    }
+
     try {
         const conflict = await pool.query(
             `SELECT id FROM appointments
              WHERE status != 'cancelled'
-               AND appointment_date = $1
+               AND appointment_date < ($1::timestamptz + ($2 || ' minutes')::interval)
+               AND (appointment_date + (duration_minutes || ' minutes')::interval) > $1::timestamptz
              LIMIT 1`,
-            [appointmentDate.toISOString()]
+            [appointmentDate.toISOString(), requestedDuration]
         );
         if (conflict.rows.length > 0) {
             return res.status(409).json({ error: 'That time slot is already requested. Please choose another one.' });
@@ -683,9 +880,9 @@ router.post('/book', verifyPortalPatient, async (req, res) => {
             `INSERT INTO appointments (
                 patient_id, dentist_id, appointment_date, duration_minutes,
                 appointment_type, status, notes, created_by, source
-            ) VALUES ($1, NULL, $2, 60, $3, 'pending', $4, NULL, 'patient_portal')
-             RETURNING id, appointment_date, appointment_type, status, source`,
-            [req.portalPatient.patient_id, appointmentDate.toISOString(), service, notes || null]
+            ) VALUES ($1, NULL, $2, $3, $4, 'pending', $5, NULL, 'patient_portal')
+             RETURNING id, appointment_date, duration_minutes, appointment_type, status, source`,
+            [req.portalPatient.patient_id, appointmentDate.toISOString(), requestedDuration, service, notes || null]
         );
 
         await logAudit(pool, {

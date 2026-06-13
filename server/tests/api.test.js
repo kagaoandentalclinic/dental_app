@@ -141,6 +141,47 @@ test('portal email verification requires a token', async () => {
     assert.equal(Array.isArray(res.payload.errors), true);
 });
 
+test('portal password reset request requires an email', async () => {
+    const handlers = getRouteHandlers(portalRouter, 'post', '/request-password-reset');
+    const { res } = await runRouteHandlers(handlers, {
+        body: { email: '' },
+    });
+    assert.equal(res.statusCode, 400);
+    assert.equal(Array.isArray(res.payload.errors), true);
+});
+
+test('portal password reset route is registered', async () => {
+    const handlers = getRouteHandlers(portalRouter, 'post', '/reset-password');
+    assert.equal(Array.isArray(handlers), true);
+    assert.equal(handlers.length > 0, true);
+});
+
+test('portal booked times route is registered', async () => {
+    const handlers = getRouteHandlers(portalRouter, 'get', '/booked-times');
+    assert.equal(Array.isArray(handlers), true);
+    assert.equal(handlers.length > 0, true);
+});
+
+test('portal booking route is registered', async () => {
+    const handlers = getRouteHandlers(portalRouter, 'post', '/book');
+    assert.equal(Array.isArray(handlers), true);
+    assert.equal(handlers.length > 0, true);
+});
+
+test('portal booking blocks Sunday dates before auth-sensitive work', async () => {
+    const handlers = getRouteHandlers(portalRouter, 'post', '/book');
+    const validationAndHandler = handlers.slice(1);
+    const { res } = await runRouteHandlers(validationAndHandler, {
+        body: {
+            preferred_date: '2026-06-14',
+            preferred_time: '09:00',
+            service: 'Checkup',
+        },
+    });
+    assert.equal(res.statusCode, 400);
+    assert.deepEqual(res.payload, { error: 'Sunday bookings are unavailable. Please choose Monday to Saturday.' });
+});
+
 test('portal Google auth returns a configuration error when client id is missing', async () => {
     const previousClientId = process.env.GOOGLE_CLIENT_ID;
     delete process.env.GOOGLE_CLIENT_ID;

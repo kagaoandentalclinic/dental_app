@@ -408,7 +408,7 @@ function OutstandingMiniList({ patients, loading }) {
                     </div>
                 </div>
                 <Link
-                    to="/patients"
+                    to="/patients?outstanding=1"
                     id="outstanding-view-all"
                     className="flex items-center gap-1 text-xs font-semibold text-[#0F6E56] hover:text-emerald-700 transition-colors"
                 >

@@ -57,18 +57,13 @@ router.get('/stats', verifyToken, async (req, res) => {
             END AS period_end
         ),
         visit_revenue AS (
-          SELECT COALESCE(SUM(
-            CASE
-              WHEN v.payment_status = 'partial' THEN COALESCE(v.cost, 0) * 0.5
-              ELSE COALESCE(v.cost, 0)
-            END
-          ), 0) AS total
+          SELECT COALESCE(SUM(COALESCE(v.cost, 0)), 0) AS total
           FROM visits v
           JOIN patients p ON p.id = v.patient_id AND p.is_active = true
           , bounds
           WHERE v.visit_date >= bounds.period_start
             AND v.visit_date < bounds.period_end
-            AND v.payment_status IN ('paid', 'insurance', 'partial')
+            AND v.payment_status = 'paid'
         ),
         ortho_downpayments AS (
           SELECT COALESCE(SUM(oc.downpayment), 0) AS total
@@ -187,7 +182,7 @@ router.get('/revenue', verifyToken, async (req, res) => {
         }
 
         // ── Revenue helpers using visits + ortho tables ────────────────
-        // Collected revenue = paid + insurance visits + partial (50%) + ortho downpayments + ortho adjustments
+        // Collected revenue = paid visits + ortho downpayments + ortho adjustments
         // Outstanding = pending + partial (50%) + active ortho balance
 
         const [
@@ -199,34 +194,25 @@ router.get('/revenue', verifyToken, async (req, res) => {
             outstandingOrthoRes,
             trendRes,
             serviceRes,
+            orthoServiceRes,
             topOutstandingRes,
         ] = await Promise.all([
 
             // ── This month collected (visits) ──────────────────────────
             pool.query(`
-                SELECT COALESCE(SUM(
-                    CASE
-                        WHEN payment_status = 'partial' THEN COALESCE(cost, 0) * 0.5
-                        ELSE COALESCE(cost, 0)
-                    END
-                ), 0) AS total
+                SELECT COALESCE(SUM(COALESCE(cost, 0)), 0) AS total
                 FROM visits v
                 JOIN patients p ON p.id = v.patient_id AND p.is_active = true
-                WHERE v.payment_status IN ('paid', 'insurance', 'partial')
+                WHERE v.payment_status = 'paid'
                   AND date_trunc('month', v.visit_date) = date_trunc('month', CURRENT_DATE)
             `),
 
             // ── Last month collected (visits) ──────────────────────────
             pool.query(`
-                SELECT COALESCE(SUM(
-                    CASE
-                        WHEN payment_status = 'partial' THEN COALESCE(cost, 0) * 0.5
-                        ELSE COALESCE(cost, 0)
-                    END
-                ), 0) AS total
+                SELECT COALESCE(SUM(COALESCE(cost, 0)), 0) AS total
                 FROM visits v
                 JOIN patients p ON p.id = v.patient_id AND p.is_active = true
-                WHERE v.payment_status IN ('paid', 'insurance', 'partial')
+                WHERE v.payment_status = 'paid'
                   AND date_trunc('month', v.visit_date) = date_trunc('month', CURRENT_DATE - INTERVAL '1 month')
             `),
 
@@ -302,10 +288,7 @@ router.get('/revenue', verifyToken, async (req, res) => {
                     visit_data AS (
                         SELECT
                             date_trunc('month', v.visit_date) AS month_start,
-                            SUM(CASE
-                                WHEN v.payment_status = 'partial' THEN COALESCE(v.cost, 0) * 0.5
-                                ELSE COALESCE(v.cost, 0)
-                            END) FILTER (WHERE v.payment_status IN ('paid','insurance','partial')) AS collected,
+                            SUM(COALESCE(v.cost, 0)) FILTER (WHERE v.payment_status = 'paid') AS collected,
                             SUM(CASE
                                 WHEN v.payment_status = 'partial' THEN COALESCE(v.cost, 0) * 0.5
                                 ELSE COALESCE(v.cost, 0)
@@ -318,14 +301,30 @@ router.get('/revenue', verifyToken, async (req, res) => {
                     ),
                     ortho_data AS (
                         SELECT
-                            date_trunc('month', oa.adjustment_date::timestamptz) AS month_start,
-                            SUM(COALESCE(oa.amount_paid, 0)) AS collected,
-                            0 AS outstanding
-                        FROM orthodontic_adjustments oa
-                        JOIN patients p ON p.id = oa.patient_id AND p.is_active = true
-                        WHERE oa.adjustment_date >= $1::date
-                          AND oa.adjustment_date <  $2::date
-                        GROUP BY 1
+                            month_start,
+                            SUM(collected) AS collected
+                        FROM (
+                            SELECT
+                                date_trunc('month', oc.start_date::timestamptz) AS month_start,
+                                SUM(COALESCE(oc.downpayment, 0)) AS collected
+                            FROM orthodontic_cases oc
+                            JOIN patients p ON p.id = oc.patient_id AND p.is_active = true
+                            WHERE oc.start_date >= $1::date
+                              AND oc.start_date <  $2::date
+                            GROUP BY 1
+
+                            UNION ALL
+
+                            SELECT
+                                date_trunc('month', oa.adjustment_date::timestamptz) AS month_start,
+                                SUM(COALESCE(oa.amount_paid, 0)) AS collected
+                            FROM orthodontic_adjustments oa
+                            JOIN patients p ON p.id = oa.patient_id AND p.is_active = true
+                            WHERE oa.adjustment_date >= $1::date
+                              AND oa.adjustment_date <  $2::date
+                            GROUP BY 1
+                        ) ortho_payments
+                        GROUP BY month_start
                     )
                     SELECT
                         to_char(m.month_start, 'Mon YYYY') AS month_label,
@@ -348,10 +347,7 @@ router.get('/revenue', verifyToken, async (req, res) => {
                     visit_data AS (
                         SELECT
                             date_trunc('month', v.visit_date) AS month_start,
-                            SUM(CASE
-                                WHEN v.payment_status = 'partial' THEN COALESCE(v.cost, 0) * 0.5
-                                ELSE COALESCE(v.cost, 0)
-                            END) FILTER (WHERE v.payment_status IN ('paid','insurance','partial')) AS collected,
+                            SUM(COALESCE(v.cost, 0)) FILTER (WHERE v.payment_status = 'paid') AS collected,
                             SUM(CASE
                                 WHEN v.payment_status = 'partial' THEN COALESCE(v.cost, 0) * 0.5
                                 ELSE COALESCE(v.cost, 0)
@@ -363,13 +359,28 @@ router.get('/revenue', verifyToken, async (req, res) => {
                     ),
                     ortho_data AS (
                         SELECT
-                            date_trunc('month', oa.adjustment_date::timestamptz) AS month_start,
-                            SUM(COALESCE(oa.amount_paid, 0)) AS collected,
-                            0 AS outstanding
-                        FROM orthodontic_adjustments oa
-                        JOIN patients p ON p.id = oa.patient_id AND p.is_active = true
-                        WHERE oa.adjustment_date >= (CURRENT_DATE - ($1 || ' months')::interval)::date
-                        GROUP BY 1
+                            month_start,
+                            SUM(collected) AS collected
+                        FROM (
+                            SELECT
+                                date_trunc('month', oc.start_date::timestamptz) AS month_start,
+                                SUM(COALESCE(oc.downpayment, 0)) AS collected
+                            FROM orthodontic_cases oc
+                            JOIN patients p ON p.id = oc.patient_id AND p.is_active = true
+                            WHERE oc.start_date >= (CURRENT_DATE - ($1 || ' months')::interval)::date
+                            GROUP BY 1
+
+                            UNION ALL
+
+                            SELECT
+                                date_trunc('month', oa.adjustment_date::timestamptz) AS month_start,
+                                SUM(COALESCE(oa.amount_paid, 0)) AS collected
+                            FROM orthodontic_adjustments oa
+                            JOIN patients p ON p.id = oa.patient_id AND p.is_active = true
+                            WHERE oa.adjustment_date >= (CURRENT_DATE - ($1 || ' months')::interval)::date
+                            GROUP BY 1
+                        ) ortho_payments
+                        GROUP BY month_start
                     )
                     SELECT
                         to_char(m.month_start, 'Mon') AS month_label,
@@ -386,18 +397,29 @@ router.get('/revenue', verifyToken, async (req, res) => {
             pool.query(`
                 SELECT
                     LOWER(TRIM(v.visit_type)) AS visit_type,
-                    COALESCE(SUM(
-                        CASE
-                            WHEN v.payment_status = 'partial' THEN COALESCE(v.cost, 0) * 0.5
-                            ELSE COALESCE(v.cost, 0)
-                        END
-                    ), 0) AS total
+                    COALESCE(SUM(COALESCE(v.cost, 0)), 0) AS total
                 FROM visits v
                 JOIN patients p ON p.id = v.patient_id AND p.is_active = true
                 WHERE date_trunc('month', v.visit_date) = date_trunc('month', CURRENT_DATE)
-                  AND v.payment_status IN ('paid', 'insurance', 'partial')
+                  AND v.payment_status = 'paid'
                 GROUP BY LOWER(TRIM(v.visit_type))
                 ORDER BY total DESC
+            `),
+
+            pool.query(`
+                SELECT
+                    (
+                        SELECT COALESCE(SUM(oc.downpayment), 0)
+                        FROM orthodontic_cases oc
+                        JOIN patients p ON p.id = oc.patient_id AND p.is_active = true
+                        WHERE date_trunc('month', oc.start_date::timestamptz) = date_trunc('month', CURRENT_DATE)
+                    ) +
+                    (
+                        SELECT COALESCE(SUM(oa.amount_paid), 0)
+                        FROM orthodontic_adjustments oa
+                        JOIN patients p ON p.id = oa.patient_id AND p.is_active = true
+                        WHERE date_trunc('month', oa.adjustment_date::timestamptz) = date_trunc('month', CURRENT_DATE)
+                    ) AS total
             `),
 
             // ── Top 5 outstanding patients ─────────────────────────────
@@ -483,6 +505,8 @@ router.get('/revenue', verifyToken, async (req, res) => {
             }
             if (!matched) serviceBreakdown.others += parseFloat(row.total);
         }
+
+        serviceBreakdown.orthodontics += parseFloat(orthoServiceRes.rows[0].total || 0);
 
         // Get last month name
         const lastMonthDate = new Date();

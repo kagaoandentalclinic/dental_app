@@ -29,9 +29,36 @@ const BACKUP_TABLES = [
 ];
 
 const BACKUP_TABLE_NAMES = BACKUP_TABLES.map(table => table.name);
+const BACKUP_JSON_COLUMNS = {
+    audit_logs: new Set(['before_data', 'after_data', 'metadata']),
+};
 
 function quoteIdentifier(identifier) {
     return `"${String(identifier).replace(/"/g, '""')}"`;
+}
+
+function normalizeJsonColumnValue(value) {
+    if (value == null) return null;
+
+    if (typeof value === 'string') {
+        try {
+            return JSON.stringify(JSON.parse(value));
+        } catch {
+            return JSON.stringify(value);
+        }
+    }
+
+    return JSON.stringify(value);
+}
+
+function normalizeBackupValue(tableName, column, value) {
+    if (value == null) return null;
+
+    if (BACKUP_JSON_COLUMNS[tableName]?.has(column)) {
+        return normalizeJsonColumnValue(value);
+    }
+
+    return value;
 }
 
 async function fetchTableRows(db, table) {
@@ -54,7 +81,7 @@ async function insertRows(db, tableName, rows) {
         const values = [];
         const placeholders = batch.map((row, rowIndex) => {
             return `(${columns.map((column, columnIndex) => {
-                values.push(row[column] ?? null);
+                values.push(normalizeBackupValue(tableName, column, row[column]));
                 return `$${rowIndex * columns.length + columnIndex + 1}`;
             }).join(', ')})`;
         }).join(', ');

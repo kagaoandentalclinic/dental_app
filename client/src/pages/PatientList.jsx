@@ -1,10 +1,26 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Search, UserPlus, Eye, Pencil, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Users } from 'lucide-react';
 import client from '../api/client';
 import { formatName, calcAge, formatDate, debounce } from '../utils/helpers';
 import EmptyState from '../components/EmptyState';
+
+const SORTABLE_COLUMNS = new Set(['last_name', 'date_of_birth', 'phone', 'created_at']);
+
+function getInitialSort(searchParams) {
+    const sort = searchParams.get('sort');
+    return SORTABLE_COLUMNS.has(sort) ? sort : 'last_name';
+}
+
+function getInitialOrder(searchParams) {
+    return searchParams.get('order') === 'desc' ? 'desc' : 'asc';
+}
+
+function getInitialPage(searchParams) {
+    const page = parseInt(searchParams.get('page') || '1', 10);
+    return Number.isNaN(page) || page < 1 ? 1 : page;
+}
 
 function SkeletonRow() {
     return (
@@ -14,6 +30,7 @@ function SkeletonRow() {
             <td className="hidden sm:table-cell px-4 py-3.5"><div className="skeleton h-3.5 rounded w-full" /></td>
             <td className="hidden md:table-cell px-4 py-3.5"><div className="skeleton h-3.5 rounded w-full" /></td>
             <td className="hidden sm:table-cell px-4 py-3.5"><div className="skeleton h-3.5 rounded w-full" /></td>
+            <td className="hidden lg:table-cell px-4 py-3.5"><div className="skeleton h-3.5 rounded w-full" /></td>
             <td className="hidden sm:table-cell px-4 py-3.5"><div className="skeleton h-3.5 rounded w-full" /></td>
             <td className="px-4 py-3.5"><div className="skeleton h-3.5 rounded w-full" /></td>
             <td className="px-4 py-3.5"><div className="skeleton h-3.5 rounded w-full" /></td>
@@ -22,19 +39,32 @@ function SkeletonRow() {
 }
 
 export default function PatientList() {
+    const [searchParams, setSearchParams] = useSearchParams();
     const [data, setData] = useState({ patients: [], total: 0, totalPages: 1 });
-    const [search, setSearch] = useState('');
-    const [page, setPage] = useState(1);
-    const [sortCol, setSortCol] = useState('last_name');
-    const [sortOrder, setSortOrder] = useState('asc');
+    const [search, setSearch] = useState(() => searchParams.get('search') || '');
+    const [page, setPage] = useState(() => getInitialPage(searchParams));
+    const [sortCol, setSortCol] = useState(() => getInitialSort(searchParams));
+    const [sortOrder, setSortOrder] = useState(() => getInitialOrder(searchParams));
+    const [visitDate, setVisitDate] = useState(() => searchParams.get('visitDate') || '');
+    const [outstandingOnly] = useState(() => ['1', 'true'].includes((searchParams.get('outstanding') || '').toLowerCase()));
     const [loading, setLoading] = useState(true);
     const navigate = useNavigate();
+    const isRecentView = sortCol === 'created_at';
+    const hasVisitDateFilter = Boolean(visitDate);
 
-    const fetchPatients = useCallback(async (q, p, col, ord) => {
+    const fetchPatients = useCallback(async (q, p, col, ord, selectedVisitDate, outstandingFilter) => {
         setLoading(true);
         try {
             const res = await client.get('/patients', {
-                params: { search: q, page: p, limit: 15, sort: col, order: ord }
+                params: {
+                    search: q,
+                    page: p,
+                    limit: 15,
+                    sort: col,
+                    order: ord,
+                    visitDate: selectedVisitDate || undefined,
+                    outstanding: outstandingFilter ? '1' : undefined,
+                }
             });
             setData(res.data);
         } finally {
@@ -42,15 +72,33 @@ export default function PatientList() {
         }
     }, []);
 
-    const debouncedFetch = useRef(debounce((q, p, col, ord) => fetchPatients(q, p, col, ord), 300)).current;
+    const debouncedFetch = useRef(debounce((q, p, col, ord, selectedVisitDate, outstandingFilter) => (
+        fetchPatients(q, p, col, ord, selectedVisitDate, outstandingFilter)
+    ), 300)).current;
 
     useEffect(() => {
-        debouncedFetch(search, page, sortCol, sortOrder);
-    }, [search, page, sortCol, sortOrder, debouncedFetch]);
+        debouncedFetch(search, page, sortCol, sortOrder, visitDate, outstandingOnly);
+    }, [search, page, sortCol, sortOrder, visitDate, outstandingOnly, debouncedFetch]);
+
+    useEffect(() => {
+        const nextParams = new URLSearchParams();
+        if (search) nextParams.set('search', search);
+        if (page > 1) nextParams.set('page', String(page));
+        if (visitDate) nextParams.set('visitDate', visitDate);
+        if (outstandingOnly) nextParams.set('outstanding', '1');
+        if (sortCol !== 'last_name' || sortOrder !== 'asc') {
+            nextParams.set('sort', sortCol);
+            nextParams.set('order', sortOrder);
+        }
+        setSearchParams(nextParams, { replace: true });
+    }, [outstandingOnly, page, search, visitDate, setSearchParams, sortCol, sortOrder]);
 
     const handleSort = (col) => {
         if (col === sortCol) setSortOrder(o => o === 'asc' ? 'desc' : 'asc');
-        else { setSortCol(col); setSortOrder('asc'); }
+        else {
+            setSortCol(col);
+            setSortOrder(col === 'created_at' ? 'desc' : 'asc');
+        }
         setPage(1);
     };
 
@@ -59,27 +107,31 @@ export default function PatientList() {
         return sortOrder === 'asc' ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />;
     };
 
-    const cols = [
-        { key: '#', label: '#', sortable: false },
-        { key: 'last_name', label: 'Name', sortable: true },
-        { key: 'date_of_birth', label: 'Age', sortable: true },
-        { key: 'sex', label: 'Sex', sortable: false },
-        { key: 'phone', label: 'Phone', sortable: true },
-        { key: 'last_visit', label: 'Last Visit', sortable: false },
-        { key: 'dental_issues', label: 'Issues', sortable: false },
-        { key: 'actions', label: 'Actions', sortable: false },
-    ];
-
     const start = (page - 1) * 15 + 1;
     const end = Math.min(page * 15, data.total);
+
+    const clearVisitDateFilter = () => {
+        setVisitDate('');
+        setPage(1);
+    };
 
     return (
         <div className="space-y-5 animate-fade-up">
             {/* Header */}
             <div className="flex items-center justify-between gap-4 flex-wrap">
                 <div>
-                    <h1 className="text-xl font-bold text-text-primary">Patients</h1>
-                    <p className="text-sm text-slate-400 mt-0.5">{data.total} total records</p>
+                    <h1 className="text-xl font-bold text-text-primary">
+                        {outstandingOnly ? 'Outstanding Balances' : isRecentView ? 'Recent Patients' : 'Patients'}
+                    </h1>
+                    <p className="text-sm text-slate-400 mt-0.5">
+                        {outstandingOnly
+                            ? `${data.total} patients with outstanding balances`
+                            : hasVisitDateFilter
+                            ? `${data.total} patients matched the selected visit date`
+                            : isRecentView
+                            ? `${data.total} records sorted by registration date`
+                            : `${data.total} total records`}
+                    </p>
                 </div>
                 <Link to="/patients/new" className="btn-primary w-full sm:w-auto">
                     <UserPlus className="w-4 h-4" /> Add Patient
@@ -130,7 +182,37 @@ export default function PatientList() {
                                         Phone <SortIcon col="phone" />
                                     </span>
                                 </th>
-                                <th className="hidden sm:table-cell whitespace-nowrap">Last Visit</th>
+                                <th
+                                    className="hidden lg:table-cell whitespace-nowrap cursor-pointer hover:text-primary select-none"
+                                    onClick={() => handleSort('created_at')}
+                                >
+                                    <span className="flex items-center gap-1">
+                                        Registered <SortIcon col="created_at" />
+                                    </span>
+                                </th>
+                                <th className="hidden sm:table-cell whitespace-nowrap align-top">
+                                    <div className="flex flex-col gap-2 min-w-[10rem]">
+                                        <span>Last Visit</span>
+                                        <input
+                                            type="date"
+                                            className="form-input text-xs min-w-0"
+                                            value={visitDate}
+                                            onChange={e => {
+                                                setVisitDate(e.target.value);
+                                                setPage(1);
+                                            }}
+                                        />
+                                        {hasVisitDateFilter && (
+                                            <button
+                                                type="button"
+                                                onClick={clearVisitDateFilter}
+                                                className="text-[11px] font-medium text-primary hover:text-primary-light text-left"
+                                            >
+                                                Clear date
+                                            </button>
+                                        )}
+                                    </div>
+                                </th>
                                 <th className="whitespace-nowrap">Issues</th>
                                 <th className="whitespace-nowrap">Actions</th>
                             </tr>
@@ -139,11 +221,19 @@ export default function PatientList() {
                             {loading ? (
                                 [1, 2, 3, 4, 5, 6].map(i => <SkeletonRow key={i} />)
                             ) : data.patients.length === 0 ? (
-                                <tr><td colSpan={8}>
+                                <tr><td colSpan={9}>
                                     <EmptyState
                                         icon={Users}
                                         title="No patients found"
-                                        message={search ? `No results for "${search}"` : 'Start by adding your first patient.'}
+                                        message={
+                                            search
+                                                ? `No results for "${search}"`
+                                                : outstandingOnly
+                                                    ? 'No patients have outstanding balances.'
+                                                : hasVisitDateFilter
+                                                    ? 'No patients matched the selected visit date.'
+                                                    : 'Start by adding your first patient.'
+                                        }
                                         action={<Link to="/patients/new" className="btn-primary">Add Patient</Link>}
                                     />
                                 </td></tr>
@@ -177,6 +267,7 @@ export default function PatientList() {
                                         <td className="hidden sm:table-cell text-slate-500">{calcAge(p.date_of_birth)} yrs</td>
                                         <td className="hidden md:table-cell text-slate-500 capitalize">{p.sex || '—'}</td>
                                         <td className="hidden sm:table-cell text-slate-500">{p.phone || '—'}</td>
+                                        <td className="hidden lg:table-cell text-slate-500">{formatDate(p.created_at)}</td>
                                         <td className="hidden sm:table-cell text-slate-500">{p.last_visit ? formatDate(p.last_visit) : <span className="text-slate-300 italic">No visits</span>}</td>
                                         <td>
                                             {parseInt(p.dental_issues) > 0

@@ -211,7 +211,7 @@ export default function Dashboard() {
                             <p className="text-xs text-slate-400 mt-0.5">Latest registered patients</p>
                         </div>
                         <Link
-                            to="/patients"
+                            to="/patients?sort=created_at&order=desc"
                             className="flex items-center gap-1 text-xs font-semibold text-primary hover:text-primary-light transition-colors"
                         >
                             View all <ArrowRight className="w-3.5 h-3.5" />
@@ -294,7 +294,7 @@ export default function Dashboard() {
                             </div>
                         </div>
                         <Link
-                            to="/patients"
+                            to="/patients?outstanding=1"
                             className="flex items-center gap-1 text-xs font-semibold text-primary hover:text-primary-light transition-colors"
                         >
                             View all <ArrowRight className="w-3.5 h-3.5" />

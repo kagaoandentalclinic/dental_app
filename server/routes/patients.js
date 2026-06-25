@@ -49,6 +49,58 @@ function handleValidationErrors(req, res) {
     return res.status(400).json({ errors: errors.array() });
 }
 
+function buildPatientSearchWhereClause(searchQuery, visitDate, outstandingOnly) {
+    const values = [searchQuery];
+    const filters = [
+        `p.is_active = true`,
+        `(
+            p.last_name ILIKE $1 OR p.first_name ILIKE $1
+            OR CONCAT(p.last_name, ' ', p.first_name) ILIKE $1
+            OR CONCAT(p.first_name, ' ', p.last_name) ILIKE $1
+            OR (CASE WHEN pc.patient_id IS NOT NULL THEN pc.phone ELSE p.phone END) ILIKE $1
+            OR (CASE WHEN pc.patient_id IS NOT NULL THEN pc.email ELSE p.email END) ILIKE $1
+        )`,
+    ];
+
+    if (outstandingOnly) {
+        filters.push(`(
+            EXISTS (
+                SELECT 1
+                FROM visits v_balance
+                WHERE v_balance.patient_id = p.id
+                  AND v_balance.payment_status IN ('pending', 'partial')
+            )
+            OR EXISTS (
+                SELECT 1
+                FROM orthodontic_cases oc_balance
+                WHERE oc_balance.patient_id = p.id
+                  AND oc_balance.status = 'active'
+                  AND oc_balance.total_paid < oc_balance.total_cost
+            )
+        )`);
+    }
+
+    if (visitDate) {
+        const visitFilters = ['v_filter.patient_id = p.id'];
+
+        if (visitDate) {
+            values.push(visitDate);
+            visitFilters.push(`v_filter.visit_date::date = $${values.length}::date`);
+        }
+
+        filters.push(`EXISTS (
+            SELECT 1
+            FROM visits v_filter
+            WHERE ${visitFilters.join(' AND ')}
+        )`);
+    }
+
+    return {
+        whereSql: filters.join('\n               AND '),
+        values,
+    };
+}
+
 // GET /api/patients - paginated + search
 router.get('/', verifyToken, async (req, res) => {
     try {
@@ -58,6 +110,8 @@ router.get('/', verifyToken, async (req, res) => {
             limit = 15,
             sort = 'last_name',
             order = 'asc',
+            visitDate = '',
+            outstanding = '',
         } = req.query;
 
         const sortMap = {
@@ -71,21 +125,18 @@ router.get('/', verifyToken, async (req, res) => {
         const sortOrder = order === 'desc' ? 'DESC' : 'ASC';
         const offset = (parseInt(page, 10) - 1) * parseInt(limit, 10);
         const searchQuery = `%${search}%`;
+        const normalizedVisitDate = /^\d{4}-\d{2}-\d{2}$/.test(String(visitDate)) ? String(visitDate) : '';
+        const outstandingOnly = String(outstanding) === '1' || String(outstanding).toLowerCase() === 'true';
+        const { whereSql, values } = buildPatientSearchWhereClause(searchQuery, normalizedVisitDate, outstandingOnly);
 
         const countRes = await pool.query(
             `SELECT COUNT(*) FROM patients p
              LEFT JOIN patient_contacts pc ON pc.patient_id = p.id
-             WHERE p.is_active = true
-               AND (
-                 p.last_name ILIKE $1 OR p.first_name ILIKE $1
-                 OR CONCAT(p.last_name, ' ', p.first_name) ILIKE $1
-                 OR CONCAT(p.first_name, ' ', p.last_name) ILIKE $1
-                 OR (CASE WHEN pc.patient_id IS NOT NULL THEN pc.phone ELSE p.phone END) ILIKE $1
-                 OR (CASE WHEN pc.patient_id IS NOT NULL THEN pc.email ELSE p.email END) ILIKE $1
-               )`,
-            [searchQuery]
+             WHERE ${whereSql}`,
+            values
         );
 
+        const patientValues = [...values, parseInt(limit, 10), offset];
         const patientsRes = await pool.query(
             `SELECT
                 p.id,
@@ -109,17 +160,10 @@ router.get('/', verifyToken, async (req, res) => {
                 ) AS last_visit
              FROM patients p
              LEFT JOIN patient_contacts pc ON pc.patient_id = p.id
-             WHERE p.is_active = true
-               AND (
-                 p.last_name ILIKE $1 OR p.first_name ILIKE $1
-                 OR CONCAT(p.last_name, ' ', p.first_name) ILIKE $1
-                 OR CONCAT(p.first_name, ' ', p.last_name) ILIKE $1
-                 OR (CASE WHEN pc.patient_id IS NOT NULL THEN pc.phone ELSE p.phone END) ILIKE $1
-                 OR (CASE WHEN pc.patient_id IS NOT NULL THEN pc.email ELSE p.email END) ILIKE $1
-               )
+             WHERE ${whereSql}
              ORDER BY ${sortCol} ${sortOrder}
-             LIMIT $2 OFFSET $3`,
-            [searchQuery, parseInt(limit, 10), offset]
+             LIMIT $${patientValues.length - 1} OFFSET $${patientValues.length}`,
+            patientValues
         );
 
         res.json({

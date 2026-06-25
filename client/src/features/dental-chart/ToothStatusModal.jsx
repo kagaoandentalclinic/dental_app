@@ -2,7 +2,7 @@ import { useState } from 'react';
 import Modal from '../../components/Modal';
 import { TOOTH_STATUSES, TOOTH_NAMES } from '../../utils/constants';
 
-export default function ToothStatusModal({ tooth, onSave, onClose }) {
+export default function ToothStatusModal({ tooth, notation = 'Universal', displayNumber, toothName, onSave, onClose }) {
     const { number, tooth: toothData, isExtra } = tooth;
     const [status, setStatus] = useState(toothData?.status || 'healthy');
     const [notes, setNotes] = useState(toothData?.notes || '');
@@ -13,11 +13,11 @@ export default function ToothStatusModal({ tooth, onSave, onClose }) {
 
     const title = isExtra
         ? `${toothData?.extra_label || 'Extra Tooth'} (#${number})`
-        : `Tooth #${number}`;
+        : `Tooth ${displayNumber || number}`;
 
     const subtitle = isExtra
         ? 'Supernumerary tooth'
-        : TOOTH_NAMES[number];
+        : `${notation} notation${toothName || TOOTH_NAMES[number] ? ` · ${toothName || TOOTH_NAMES[number]}` : ''}`;
 
     return (
         <Modal

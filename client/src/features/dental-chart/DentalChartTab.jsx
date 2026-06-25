@@ -21,6 +21,14 @@ const UNIVERSAL_TO_FDI = {
 const FDI_TO_UNIVERSAL = Object.fromEntries(
     Object.entries(UNIVERSAL_TO_FDI).map(([universal, fdi]) => [fdi, Number(universal)])
 );
+const UNIVERSAL_TO_PALMER = Object.fromEntries(
+    Object.entries(UNIVERSAL_TO_FDI).map(([universal, fdi]) => {
+        const quadrant = fdi[0];
+        const tooth = fdi[1];
+        const suffix = { 1: 'UR', 2: 'UL', 3: 'LL', 4: 'LR' }[quadrant] || '';
+        return [universal, `${tooth}${suffix}`];
+    })
+);
 const UNIVERSAL_TO_NAME = {
     1: 'Upper Right Third Molar', 2: 'Upper Right Second Molar', 3: 'Upper Right First Molar',
     4: 'Upper Right Second Premolar', 5: 'Upper Right First Premolar', 6: 'Upper Right Canine',
@@ -35,6 +43,30 @@ const UNIVERSAL_TO_NAME = {
     28: 'Lower Right First Premolar', 29: 'Lower Right Second Premolar', 30: 'Lower Right First Molar',
     31: 'Lower Right Second Molar', 32: 'Lower Right Third Molar',
 };
+const UNIVERSAL_TO_QUADRANT = {
+    1: 'Upper Right', 2: 'Upper Right', 3: 'Upper Right', 4: 'Upper Right',
+    5: 'Upper Right', 6: 'Upper Right', 7: 'Upper Right', 8: 'Upper Right',
+    9: 'Upper Left', 10: 'Upper Left', 11: 'Upper Left', 12: 'Upper Left',
+    13: 'Upper Left', 14: 'Upper Left', 15: 'Upper Left', 16: 'Upper Left',
+    17: 'Lower Left', 18: 'Lower Left', 19: 'Lower Left', 20: 'Lower Left',
+    21: 'Lower Left', 22: 'Lower Left', 23: 'Lower Left', 24: 'Lower Left',
+    25: 'Lower Right', 26: 'Lower Right', 27: 'Lower Right', 28: 'Lower Right',
+    29: 'Lower Right', 30: 'Lower Right', 31: 'Lower Right', 32: 'Lower Right',
+};
+
+function getNotationValue(universalNumber, notation) {
+    if (notation === 'FDI') return UNIVERSAL_TO_FDI[universalNumber] || String(universalNumber);
+    if (notation === 'Palmer') return UNIVERSAL_TO_PALMER[universalNumber] || String(universalNumber);
+    return String(universalNumber);
+}
+
+function getNotationLabel(universalNumber, notation) {
+    const notationValue = getNotationValue(universalNumber, notation);
+    const quadrant = UNIVERSAL_TO_QUADRANT[universalNumber];
+
+    if (!quadrant) return notationValue;
+    return `${notationValue} · ${quadrant}`;
+}
 
 export default function DentalChartTab({ patient }) {
     const toast = useToast();
@@ -204,11 +236,7 @@ export default function DentalChartTab({ patient }) {
                     {UNIVERSAL_TO_NAME[universalNumber] || `Tooth ${payload.notations.universal}`}
                 </p>
                 <p className="text-xs mt-1">
-                    {notation}: {notation === 'FDI'
-                        ? payload.notations.fdi
-                        : notation === 'Palmer'
-                            ? payload.notations.palmer
-                            : payload.notations.universal}
+                    {notation}: {getNotationLabel(universalNumber, notation)}
                 </p>
                 <p className="text-xs mt-1">
                     Status:{' '}
@@ -246,7 +274,10 @@ export default function DentalChartTab({ patient }) {
                         <select
                             className="form-input text-sm w-full sm:w-[160px]"
                             value={notation}
-                            onChange={e => setNotation(e.target.value)}
+                            onChange={e => {
+                                setNotation(e.target.value);
+                                setOdontogramResetKey(v => v + 1);
+                            }}
                         >
                             {NOTATION_OPTIONS.map(option => (
                                 <option key={option} value={option}>{option} Notation</option>
@@ -278,7 +309,7 @@ export default function DentalChartTab({ patient }) {
                                 <span className="text-xs font-semibold text-text-secondary uppercase tracking-wider">Patient's Left</span>
                             </div>
                             <Odontogram
-                                key={odontogramResetKey}
+                                key={`${notation}-${odontogramResetKey}`}
                                 singleSelect
                                 notation={notation}
                                 layout={odontogramLayout}
@@ -431,6 +462,9 @@ export default function DentalChartTab({ patient }) {
             {selectedTooth && (
                 <ToothStatusModal
                     tooth={selectedTooth}
+                    notation={notation}
+                    displayNumber={selectedTooth.isExtra ? selectedTooth.number : getNotationLabel(selectedTooth.number, notation)}
+                    toothName={!selectedTooth.isExtra ? UNIVERSAL_TO_NAME[selectedTooth.number] : null}
                     onSave={handleToothUpdate}
                     onClose={() => {
                         setSelectedTooth(null);

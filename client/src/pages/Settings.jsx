@@ -24,6 +24,53 @@ const ROLES = ['admin', 'dentist', 'hygienist', 'receptionist'];
 
 const fadeUp = { initial: { opacity: 0, y: 16 }, animate: { opacity: 1, y: 0 }, transition: { duration: 0.3 } };
 
+async function createBackupDownloadPayload(data) {
+    const json = JSON.stringify(data, null, 2);
+
+    if (typeof CompressionStream === 'undefined') {
+        return {
+            blob: new Blob([json], { type: 'application/json' }),
+            extension: 'json',
+        };
+    }
+
+    const gzipStream = new Blob([json], { type: 'application/json' })
+        .stream()
+        .pipeThrough(new CompressionStream('gzip'));
+    const compressed = await new Response(gzipStream).arrayBuffer();
+
+    return {
+        blob: new Blob([compressed], { type: 'application/gzip' }),
+        extension: 'gz',
+    };
+}
+
+async function parseBackupFile(file) {
+    const buffer = await file.arrayBuffer();
+    const bytes = new Uint8Array(buffer);
+    const isGzip = bytes.length >= 2 && bytes[0] === 0x1f && bytes[1] === 0x8b;
+
+    let raw;
+    if (isGzip) {
+        if (typeof DecompressionStream === 'undefined') {
+            throw new Error('This browser cannot open compressed backup files. Please use a newer browser or restore a JSON backup.');
+        }
+
+        const decompressedStream = new Blob([buffer], { type: 'application/gzip' })
+            .stream()
+            .pipeThrough(new DecompressionStream('gzip'));
+        raw = await new Response(decompressedStream).text();
+    } else {
+        raw = new TextDecoder().decode(buffer);
+    }
+
+    try {
+        return JSON.parse(raw);
+    } catch {
+        throw new Error('Invalid backup file. Please choose a valid .gz or .json backup.');
+    }
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function Label({ children }) {
@@ -1157,11 +1204,11 @@ function BackupTab() {
         try {
             const res = await client.get('/settings/backup');
             const timestamp = (res.data.exported_at || new Date().toISOString()).replace(/[:.]/g, '-');
-            const blob = new Blob([JSON.stringify(res.data, null, 2)], { type: 'application/json' });
+            const { blob, extension } = await createBackupDownloadPayload(res.data);
             const url = URL.createObjectURL(blob);
             const link = document.createElement('a');
             link.href = url;
-            link.download = `kagaoan-backup-${timestamp}.gz`;
+            link.download = `kagaoan-backup-${timestamp}.${extension}`;
             document.body.appendChild(link);
             link.click();
             link.remove();
@@ -1184,23 +1231,17 @@ function BackupTab() {
 
         setRestoring(true);
         try {
-            const raw = await restoreFile.text();
-            let backup;
-
-            try {
-                backup = JSON.parse(raw);
-            } catch {
-                showToast('Invalid backup file. Expected JSON content inside the .gz file.', 'error');
-                return;
-            }
-
-            await client.post('/settings/backup/restore', { backup });
+            const backup = await parseBackupFile(restoreFile);
+            await client.post('/settings/backup/restore', { backup }, {
+                maxBodyLength: Infinity,
+                maxContentLength: Infinity,
+            });
             setRestoreFile(null);
             setConfirmRestore(false);
             if (fileInputRef.current) fileInputRef.current.value = '';
             showToast('Backup restored successfully', 'success');
         } catch (err) {
-            showToast(err.response?.data?.error || 'Failed to restore backup', 'error');
+            showToast(err.response?.data?.error || err.message || 'Failed to restore backup', 'error');
         } finally {
             setRestoring(false);
         }
@@ -1217,7 +1258,7 @@ function BackupTab() {
                         <div>
                             <p className="font-semibold text-text-primary">Data Backup</p>
                             <p className="text-sm text-text-secondary mt-0.5">
-                                Download a full clinic backup as a `.gz` file. The file extension is `.gz`, but the contents are JSON for easy restore.
+                                Download a full clinic backup as a compressed `.gz` file when supported, with `.json` fallback for older browsers. Both formats can be restored here.
                             </p>
                         </div>
                     </div>
@@ -1248,7 +1289,7 @@ function BackupTab() {
                     <input
                         ref={fileInputRef}
                         type="file"
-                        accept=".gz,.json,application/json"
+                        accept=".gz,.json,application/json,application/gzip"
                         className="hidden"
                         onChange={handleRestoreFileChange}
                     />
@@ -1276,7 +1317,7 @@ function BackupTab() {
                     <p className="text-xs text-text-secondary">
                         {restoreFile
                             ? `Selected file: ${restoreFile.name}`
-                            : 'Accepted file types: .gz or .json. The .gz file should contain JSON data.'}
+                            : 'Accepted file types: .gz or .json. Compressed gzip backups and plain JSON backups are both supported.'}
                     </p>
                 </div>
             </div>

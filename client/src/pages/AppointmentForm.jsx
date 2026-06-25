@@ -5,7 +5,7 @@ import { CheckCircle, User, Calendar, Ban, AlertCircle, Stethoscope, MessageSqua
 import axios from 'axios';
 import { VISIT_TYPES } from '../utils/constants';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
+const API_BASE = import.meta.env.VITE_API_URL || '/api';
 const api = axios.create({ baseURL: API_BASE });
 
 function getDeviceId() {

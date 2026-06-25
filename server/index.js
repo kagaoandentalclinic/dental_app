@@ -1,4 +1,6 @@
-require('dotenv').config({ path: require('path').resolve(__dirname, '../.env') });
+const fs = require('fs');
+const path = require('path');
+require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -7,28 +9,48 @@ const { getJwtSecret } = require('./utils/jwt');
 
 const app = express();
 app.set('trust proxy', 1);
+const BODY_LIMIT = '200mb';
 
 app.use(helmet({ contentSecurityPolicy: false }));
 
-const allowedOrigins = [
+const normalizeOrigin = (origin) => origin.replace(/\/$/, '');
+const allowedOrigins = new Set([
     'http://localhost:5173',
     'http://localhost:5174',
     process.env.CLIENT_URL,
-].filter(Boolean).map(origin => origin.replace(/\/$/, ''));
+].filter(Boolean).map(normalizeOrigin));
 
-app.use(cors({
-    origin: (origin, callback) => {
-        if (!origin || allowedOrigins.includes(origin.replace(/\/$/, ''))) {
-            callback(null, true);
-            return;
-        }
-        callback(new Error('Not allowed by CORS'));
-    },
-    credentials: true,
+const isSameOriginRequest = (origin, req) => {
+    try {
+        const requestHost = req.get('host');
+        if (!requestHost) return false;
+
+        const originUrl = new URL(origin);
+        const requestProtocol = req.get('x-forwarded-proto') || req.protocol;
+        return originUrl.host === requestHost && originUrl.protocol === `${requestProtocol}:`;
+    } catch {
+        return false;
+    }
+};
+
+app.use(cors((req, callback) => {
+    const origin = req.header('Origin');
+    if (!origin) {
+        callback(null, { origin: true, credentials: true });
+        return;
+    }
+
+    const normalizedOrigin = normalizeOrigin(origin);
+    if (allowedOrigins.has(normalizedOrigin) || isSameOriginRequest(normalizedOrigin, req)) {
+        callback(null, { origin: true, credentials: true });
+        return;
+    }
+
+    callback(new Error('Not allowed by CORS'));
 }));
 
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+app.use(express.json({ limit: BODY_LIMIT }));
+app.use(express.urlencoded({ extended: true, limit: BODY_LIMIT }));
 
 const authRoutes = require('./routes/auth');
 const patientRoutes = require('./routes/patients');
@@ -64,7 +86,29 @@ app.use('/api/portal', portalRoutes);
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok', version: '1.0.0' }));
 
+const clientDistPath = path.resolve(__dirname, '../client/dist');
+const clientIndexPath = path.join(clientDistPath, 'index.html');
+
+if (fs.existsSync(clientIndexPath)) {
+    app.use(express.static(clientDistPath));
+
+    app.get('*', (req, res, next) => {
+        if (req.path.startsWith('/api')) {
+            next();
+            return;
+        }
+
+        res.sendFile(clientIndexPath);
+    });
+}
+
 app.use((err, req, res, next) => {
+    if (err?.type === 'entity.too.large') {
+        return res.status(413).json({
+            error: 'Uploaded backup is too large for the current server limit.',
+        });
+    }
+
     logger.error('Unhandled Express error', err, {
         method: req.method,
         path: req.originalUrl,

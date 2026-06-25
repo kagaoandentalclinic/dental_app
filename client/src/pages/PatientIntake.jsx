@@ -9,7 +9,7 @@ import axios from 'axios';
 import { BasicInfoSection, ContactSection, InsuranceSection, PreferencesSection, Section } from '../features/patient-form/PatientFormFields';
 import { buildPatientPayload, createPatientFormState, validatePatientForm } from '../features/patient-form/utils';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
+const API_BASE = import.meta.env.VITE_API_URL || '/api';
 const api = axios.create({ baseURL: API_BASE });
 const STEPS = ['Basic Info', 'Contact', 'Insurance & Preferences', 'Photo & Review'];
 

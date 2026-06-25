@@ -2,10 +2,10 @@
   "$schema": "https://railway.com/railway.schema.json",
   "build": {
     "builder": "RAILPACK",
-    "buildCommand": "if [ -f server/package.json ]; then npm ci --prefix server; else npm ci; fi"
+    "buildCommand": "npm ci --prefix server && npm ci --prefix client && npm run build --prefix client"
   },
   "deploy": {
-    "startCommand": "if [ -f server/package.json ]; then npm start --prefix server; else npm start; fi",
+    "startCommand": "npm start --prefix server",
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 10
   }

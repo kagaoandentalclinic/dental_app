@@ -9,6 +9,43 @@ function normalizeOptionalText(value) {
     return trimmed === '' ? null : trimmed;
 }
 
+function normalizeCurrencyAmount(value) {
+    if (value == null || value === '') return null;
+
+    const parsed = Number.parseFloat(value);
+    if (!Number.isFinite(parsed) || parsed < 0) {
+        throw new Error('Amount must be a valid non-negative number');
+    }
+
+    return Math.round(parsed * 100) / 100;
+}
+
+function normalizeVisitPayment(cost, paymentStatus, partialAmountPaid) {
+    const normalizedCost = normalizeCurrencyAmount(cost);
+    const normalizedStatus = normalizeOptionalText(paymentStatus) || 'pending';
+    let normalizedPartialAmount = normalizeCurrencyAmount(partialAmountPaid);
+
+    if (normalizedStatus === 'partial') {
+        if (normalizedCost == null) {
+            throw new Error('Total cost is required for partial payments');
+        }
+        if (normalizedPartialAmount == null || normalizedPartialAmount <= 0) {
+            throw new Error('Partial amount paid is required for partial payments');
+        }
+        if (normalizedPartialAmount > normalizedCost) {
+            throw new Error('Partial amount paid cannot exceed the total cost');
+        }
+    } else {
+        normalizedPartialAmount = null;
+    }
+
+    return {
+        normalizedCost,
+        normalizedStatus,
+        normalizedPartialAmount,
+    };
+}
+
 function normalizeTeethTreated(value) {
     if (value == null || value === '') return null;
 
@@ -62,7 +99,7 @@ router.get('/', verifyToken, async (req, res) => {
 router.post('/', verifyToken, async (req, res) => {
     const {
         visit_date, visit_type, chief_complaint, diagnosis, treatment_performed,
-        teeth_treated, prescriptions, next_appointment, cost, payment_status, notes,
+        teeth_treated, prescriptions, next_appointment, cost, payment_status, partial_amount_paid, notes,
     } = req.body;
 
     const normalizedTreatment = normalizeOptionalText(treatment_performed);
@@ -73,12 +110,17 @@ router.post('/', verifyToken, async (req, res) => {
 
     try {
         const normalizedTeeth = normalizeTeethTreated(teeth_treated);
+        const {
+            normalizedCost,
+            normalizedStatus,
+            normalizedPartialAmount,
+        } = normalizeVisitPayment(cost, payment_status, partial_amount_paid);
         const result = await pool.query(`
       INSERT INTO visits (
         patient_id, dentist_id, visit_date, visit_type, chief_complaint,
         diagnosis, treatment_performed, teeth_treated, prescriptions,
-        next_appointment, cost, payment_status, notes
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+        next_appointment, cost, payment_status, partial_amount_paid, notes
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
       RETURNING *
     `, [
             req.params.id, req.admin.id,
@@ -90,8 +132,9 @@ router.post('/', verifyToken, async (req, res) => {
             normalizedTeeth,
             normalizeOptionalText(prescriptions),
             next_appointment || null,
-            cost || null,
-            normalizeOptionalText(payment_status) || 'pending',
+            normalizedCost,
+            normalizedStatus,
+            normalizedPartialAmount,
             normalizeOptionalText(notes),
         ]);
 
@@ -104,7 +147,13 @@ router.post('/', verifyToken, async (req, res) => {
 
         res.status(201).json(full.rows[0]);
     } catch (err) {
-        if (err.message === 'Teeth treated must include at least one valid tooth number') {
+        if (
+            err.message === 'Teeth treated must include at least one valid tooth number'
+            || err.message === 'Amount must be a valid non-negative number'
+            || err.message === 'Total cost is required for partial payments'
+            || err.message === 'Partial amount paid is required for partial payments'
+            || err.message === 'Partial amount paid cannot exceed the total cost'
+        ) {
             return res.status(400).json({ error: err.message });
         }
         console.error(err);
@@ -116,7 +165,7 @@ router.post('/', verifyToken, async (req, res) => {
 router.put('/:visitId', verifyToken, async (req, res) => {
     const {
         visit_date, visit_type, chief_complaint, diagnosis, treatment_performed,
-        teeth_treated, prescriptions, next_appointment, cost, payment_status, notes,
+        teeth_treated, prescriptions, next_appointment, cost, payment_status, partial_amount_paid, notes,
     } = req.body;
     const normalizedTreatment = normalizeOptionalText(treatment_performed);
     const normalizedVisitType = normalizeOptionalText(visit_type);
@@ -126,12 +175,17 @@ router.put('/:visitId', verifyToken, async (req, res) => {
 
     try {
         const normalizedTeeth = normalizeTeethTreated(teeth_treated);
+        const {
+            normalizedCost,
+            normalizedStatus,
+            normalizedPartialAmount,
+        } = normalizeVisitPayment(cost, payment_status, partial_amount_paid);
         const result = await pool.query(`
       UPDATE visits SET
         visit_date=$1, visit_type=$2, chief_complaint=$3, diagnosis=$4,
         treatment_performed=$5, teeth_treated=$6, prescriptions=$7,
-        next_appointment=$8, cost=$9, payment_status=$10, notes=$11
-      WHERE id=$12
+        next_appointment=$8, cost=$9, payment_status=$10, partial_amount_paid=$11, notes=$12
+      WHERE id=$13
       RETURNING *
     `, [
             visit_date || new Date().toISOString(),
@@ -142,8 +196,9 @@ router.put('/:visitId', verifyToken, async (req, res) => {
             normalizedTeeth,
             normalizeOptionalText(prescriptions),
             next_appointment || null,
-            cost || null,
-            normalizeOptionalText(payment_status) || 'pending',
+            normalizedCost,
+            normalizedStatus,
+            normalizedPartialAmount,
             normalizeOptionalText(notes),
             req.params.visitId,
         ]);
@@ -157,7 +212,13 @@ router.put('/:visitId', verifyToken, async (req, res) => {
 
         res.json(full.rows[0]);
     } catch (err) {
-        if (err.message === 'Teeth treated must include at least one valid tooth number') {
+        if (
+            err.message === 'Teeth treated must include at least one valid tooth number'
+            || err.message === 'Amount must be a valid non-negative number'
+            || err.message === 'Total cost is required for partial payments'
+            || err.message === 'Partial amount paid is required for partial payments'
+            || err.message === 'Partial amount paid cannot exceed the total cost'
+        ) {
             return res.status(400).json({ error: err.message });
         }
         console.error(err);

@@ -4,6 +4,25 @@ const pool = require('../db/pool');
 const { verifyToken } = require('../middleware/auth');
 const { getDentalIssueSql } = require('../utils/dentalChart');
 
+const visitCollectedAmountSql = (alias = 'v') => `
+    CASE
+        WHEN ${alias}.payment_status = 'partial' THEN COALESCE(${alias}.partial_amount_paid, COALESCE(${alias}.cost, 0) * 0.5)
+        WHEN ${alias}.payment_status IN ('paid', 'insurance') THEN COALESCE(${alias}.cost, 0)
+        ELSE 0
+    END
+`;
+
+const visitOutstandingAmountSql = (alias = 'v') => `
+    CASE
+        WHEN ${alias}.payment_status = 'partial' THEN GREATEST(
+            COALESCE(${alias}.cost, 0) - COALESCE(${alias}.partial_amount_paid, COALESCE(${alias}.cost, 0) * 0.5),
+            0
+        )
+        WHEN ${alias}.payment_status = 'pending' THEN COALESCE(${alias}.cost, 0)
+        ELSE 0
+    END
+`;
+
 // GET /api/dashboard/stats
 router.get('/stats', verifyToken, async (req, res) => {
     try {
@@ -57,13 +76,12 @@ router.get('/stats', verifyToken, async (req, res) => {
             END AS period_end
         ),
         visit_revenue AS (
-          SELECT COALESCE(SUM(COALESCE(v.cost, 0)), 0) AS total
+          SELECT COALESCE(SUM(${visitCollectedAmountSql('v')}), 0) AS total
           FROM visits v
           JOIN patients p ON p.id = v.patient_id AND p.is_active = true
           , bounds
           WHERE v.visit_date >= bounds.period_start
             AND v.visit_date < bounds.period_end
-            AND v.payment_status = 'paid'
         ),
         ortho_downpayments AS (
           SELECT COALESCE(SUM(oc.downpayment), 0) AS total
@@ -99,12 +117,7 @@ router.get('/stats', verifyToken, async (req, res) => {
           SELECT
             p.id, p.last_name, p.first_name, p.profile_photo,
             COUNT(v.id) AS visit_count,
-            COALESCE(SUM(
-              CASE
-                WHEN v.payment_status = 'partial' THEN COALESCE(v.cost, 0) * 0.5
-                ELSE COALESCE(v.cost, 0)
-              END
-            ), 0) AS amount,
+            COALESCE(SUM(${visitOutstandingAmountSql('v')}), 0) AS amount,
             MAX(v.visit_date::date) AS last_activity
           FROM visits v
           JOIN patients p ON p.id = v.patient_id AND p.is_active = true
@@ -200,20 +213,18 @@ router.get('/revenue', verifyToken, async (req, res) => {
 
             // ── This month collected (visits) ──────────────────────────
             pool.query(`
-                SELECT COALESCE(SUM(COALESCE(cost, 0)), 0) AS total
+                SELECT COALESCE(SUM(${visitCollectedAmountSql('v')}), 0) AS total
                 FROM visits v
                 JOIN patients p ON p.id = v.patient_id AND p.is_active = true
-                WHERE v.payment_status = 'paid'
-                  AND date_trunc('month', v.visit_date) = date_trunc('month', CURRENT_DATE)
+                WHERE date_trunc('month', v.visit_date) = date_trunc('month', CURRENT_DATE)
             `),
 
             // ── Last month collected (visits) ──────────────────────────
             pool.query(`
-                SELECT COALESCE(SUM(COALESCE(cost, 0)), 0) AS total
+                SELECT COALESCE(SUM(${visitCollectedAmountSql('v')}), 0) AS total
                 FROM visits v
                 JOIN patients p ON p.id = v.patient_id AND p.is_active = true
-                WHERE v.payment_status = 'paid'
-                  AND date_trunc('month', v.visit_date) = date_trunc('month', CURRENT_DATE - INTERVAL '1 month')
+                WHERE date_trunc('month', v.visit_date) = date_trunc('month', CURRENT_DATE - INTERVAL '1 month')
             `),
 
             // ── This month ortho (downpayments + adjustments) ──────────
@@ -253,13 +264,8 @@ router.get('/revenue', verifyToken, async (req, res) => {
             // ── Outstanding visits ─────────────────────────────────────
             pool.query(`
                 SELECT
-                    COALESCE(SUM(
-                        CASE
-                            WHEN v.payment_status = 'partial' THEN COALESCE(v.cost, 0) * 0.5
-                            ELSE COALESCE(v.cost, 0)
-                        END
-                    ), 0) AS total,
-                    COUNT(DISTINCT v.patient_id) AS patient_count
+                    COALESCE(SUM(${visitOutstandingAmountSql('v')}), 0) AS total,
+                    COUNT(DISTINCT v.patient_id) FILTER (WHERE ${visitOutstandingAmountSql('v')} > 0) AS patient_count
                 FROM visits v
                 JOIN patients p ON p.id = v.patient_id AND p.is_active = true
                 WHERE v.payment_status IN ('pending', 'partial')
@@ -288,11 +294,8 @@ router.get('/revenue', verifyToken, async (req, res) => {
                     visit_data AS (
                         SELECT
                             date_trunc('month', v.visit_date) AS month_start,
-                            SUM(COALESCE(v.cost, 0)) FILTER (WHERE v.payment_status = 'paid') AS collected,
-                            SUM(CASE
-                                WHEN v.payment_status = 'partial' THEN COALESCE(v.cost, 0) * 0.5
-                                ELSE COALESCE(v.cost, 0)
-                            END) FILTER (WHERE v.payment_status IN ('pending','partial')) AS outstanding
+                            SUM(${visitCollectedAmountSql('v')}) AS collected,
+                            SUM(${visitOutstandingAmountSql('v')}) AS outstanding
                         FROM visits v
                         JOIN patients p ON p.id = v.patient_id AND p.is_active = true
                         WHERE v.visit_date >= $1::timestamptz
@@ -347,11 +350,8 @@ router.get('/revenue', verifyToken, async (req, res) => {
                     visit_data AS (
                         SELECT
                             date_trunc('month', v.visit_date) AS month_start,
-                            SUM(COALESCE(v.cost, 0)) FILTER (WHERE v.payment_status = 'paid') AS collected,
-                            SUM(CASE
-                                WHEN v.payment_status = 'partial' THEN COALESCE(v.cost, 0) * 0.5
-                                ELSE COALESCE(v.cost, 0)
-                            END) FILTER (WHERE v.payment_status IN ('pending','partial')) AS outstanding
+                            SUM(${visitCollectedAmountSql('v')}) AS collected,
+                            SUM(${visitOutstandingAmountSql('v')}) AS outstanding
                         FROM visits v
                         JOIN patients p ON p.id = v.patient_id AND p.is_active = true
                         WHERE v.visit_date >= date_trunc('month', CURRENT_DATE - ($1 || ' months')::interval)
@@ -397,11 +397,10 @@ router.get('/revenue', verifyToken, async (req, res) => {
             pool.query(`
                 SELECT
                     LOWER(TRIM(v.visit_type)) AS visit_type,
-                    COALESCE(SUM(COALESCE(v.cost, 0)), 0) AS total
+                    COALESCE(SUM(${visitCollectedAmountSql('v')}), 0) AS total
                 FROM visits v
                 JOIN patients p ON p.id = v.patient_id AND p.is_active = true
                 WHERE date_trunc('month', v.visit_date) = date_trunc('month', CURRENT_DATE)
-                  AND v.payment_status = 'paid'
                 GROUP BY LOWER(TRIM(v.visit_type))
                 ORDER BY total DESC
             `),
@@ -427,12 +426,7 @@ router.get('/revenue', verifyToken, async (req, res) => {
                 WITH outstanding AS (
                     SELECT
                         p.id, p.last_name, p.first_name, p.profile_photo,
-                        COALESCE(SUM(
-                            CASE
-                                WHEN v.payment_status = 'partial' THEN COALESCE(v.cost, 0) * 0.5
-                                ELSE COALESCE(v.cost, 0)
-                            END
-                        ), 0) AS amount,
+                        COALESCE(SUM(${visitOutstandingAmountSql('v')}), 0) AS amount,
                         MAX(v.visit_date::date) AS last_visit
                     FROM visits v
                     JOIN patients p ON p.id = v.patient_id AND p.is_active = true

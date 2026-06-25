@@ -773,7 +773,10 @@ router.get('/dashboard', verifyPortalPatient, async (req, res) => {
                 `WITH visit_due AS (
                     SELECT COALESCE(SUM(
                         CASE
-                            WHEN payment_status = 'partial' THEN COALESCE(cost, 0) * 0.5
+                            WHEN payment_status = 'partial' THEN GREATEST(
+                                COALESCE(cost, 0) - COALESCE(partial_amount_paid, COALESCE(cost, 0) * 0.5),
+                                0
+                            )
                             WHEN payment_status = 'pending' THEN COALESCE(cost, 0)
                             ELSE 0
                         END

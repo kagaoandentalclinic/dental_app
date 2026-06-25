@@ -36,6 +36,35 @@ function parseVisitTypes(value) {
     return String(value).split(',').map(v => v.trim()).filter(Boolean);
 }
 
+function getVisitCollectedAmount(visit) {
+    const totalCost = parseFloat(visit.cost || 0);
+    if (visit.payment_status === 'partial') {
+        const partialPaid = parseFloat(visit.partial_amount_paid);
+        if (Number.isFinite(partialPaid)) return partialPaid;
+        return totalCost * 0.5;
+    }
+    if (visit.payment_status === 'paid' || visit.payment_status === 'insurance') {
+        return totalCost;
+    }
+    return 0;
+}
+
+function getVisitOutstandingAmount(visit) {
+    const totalCost = parseFloat(visit.cost || 0);
+    if (visit.payment_status === 'partial') {
+        return Math.max(0, totalCost - getVisitCollectedAmount(visit));
+    }
+    if (visit.payment_status === 'pending') {
+        return totalCost;
+    }
+    return 0;
+}
+
+function formatMoneyPreview(value) {
+    const amount = Number.parseFloat(value);
+    return formatCurrency(Number.isFinite(amount) ? amount : 0);
+}
+
 // Multi-select pill picker for visit types
 function VisitTypeMultiPicker({ selected, onChange }) {
     const toggle = (value) => {
@@ -83,16 +112,39 @@ function VisitForm({ patientId, visit, onSave, onClose }) {
         next_appointment: visit?.next_appointment ? toLocalDateInput(visit.next_appointment) : '',
         cost: visit?.cost || '',
         payment_status: visit?.payment_status || 'pending',
+        partial_amount_paid: visit?.partial_amount_paid || '',
         notes: visit?.notes || '',
     });
 
     const set = (field) => (e) => setForm(f => ({ ...f, [field]: e.target.value }));
     const setVisitTypes = (types) => setForm(f => ({ ...f, visit_types: types }));
+    const preventWheelChange = (e) => e.currentTarget.blur();
+    const totalCostPreview = Number.parseFloat(form.cost);
+    const partialPaidPreview = Number.parseFloat(form.partial_amount_paid);
+    const remainingPreview = Number.isFinite(totalCostPreview)
+        ? Math.max(0, totalCostPreview - (Number.isFinite(partialPaidPreview) ? partialPaidPreview : 0))
+        : 0;
 
     const handleSubmit = async (e) => {
         e.preventDefault();
         if (form.visit_types.length === 0) { toast.error('Please select at least one visit type'); return; }
         if (!form.treatment_performed.trim()) { toast.error('Treatment performed is required'); return; }
+        if (form.payment_status === 'partial') {
+            const cost = Number.parseFloat(form.cost);
+            const partialAmount = Number.parseFloat(form.partial_amount_paid);
+            if (!Number.isFinite(cost) || cost <= 0) {
+                toast.error('Enter the total cost for a partial payment');
+                return;
+            }
+            if (!Number.isFinite(partialAmount) || partialAmount <= 0) {
+                toast.error('Enter the partial amount paid');
+                return;
+            }
+            if (partialAmount > cost) {
+                toast.error('Partial amount paid cannot exceed the total cost');
+                return;
+            }
+        }
         const parsedTeeth = parseTeethTreated(form.teeth_treated);
         if (form.teeth_treated.trim() && (!parsedTeeth || parsedTeeth.length === 0)) {
             toast.error('Enter tooth numbers like #14, #15');
@@ -169,8 +221,18 @@ function VisitForm({ patientId, visit, onSave, onClose }) {
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                    <label className="form-label">Cost (PHP)</label>
-                    <input type="number" className="form-input" placeholder="0.00" value={form.cost} onChange={set('cost')} />
+                    <label className="form-label">Total Cost (PHP)</label>
+                    <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        inputMode="decimal"
+                        className="form-input"
+                        placeholder="0.00"
+                        value={form.cost}
+                        onChange={set('cost')}
+                        onWheel={preventWheelChange}
+                    />
                 </div>
                 <div>
                     <label className="form-label">Payment Status</label>
@@ -179,6 +241,39 @@ function VisitForm({ patientId, visit, onSave, onClose }) {
                     </select>
                 </div>
             </div>
+            {form.payment_status === 'partial' && (
+                <div>
+                    <label className="form-label">Partial Amount Paid (PHP)</label>
+                    <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        inputMode="decimal"
+                        className="form-input"
+                        placeholder="Enter the amount already paid"
+                        value={form.partial_amount_paid}
+                        onChange={set('partial_amount_paid')}
+                        onWheel={preventWheelChange}
+                    />
+                    <p className="text-xs text-text-secondary mt-1">
+                        Enter the actual amount paid. The remaining balance will be based on the total cost.
+                    </p>
+                    <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Total</p>
+                            <p className="text-sm font-bold text-slate-800">{formatMoneyPreview(form.cost)}</p>
+                        </div>
+                        <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2">
+                            <p className="text-[11px] font-semibold uppercase tracking-wide text-emerald-500">Paid</p>
+                            <p className="text-sm font-bold text-emerald-700">{formatMoneyPreview(form.partial_amount_paid)}</p>
+                        </div>
+                        <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2">
+                            <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-500">Balance</p>
+                            <p className="text-sm font-bold text-amber-700">{formatCurrency(remainingPreview)}</p>
+                        </div>
+                    </div>
+                </div>
+            )}
             <div>
                 <label className="form-label">Next Appointment</label>
                 <input type="date" className="form-input" value={form.next_appointment} onChange={set('next_appointment')} />
@@ -199,13 +294,8 @@ function VisitForm({ patientId, visit, onSave, onClose }) {
 
 function FinancialSummary({ visits }) {
     const billed = visits.reduce((s, v) => s + parseFloat(v.cost || 0), 0);
-    const paid = visits
-        .filter(v => v.payment_status === 'paid' || v.payment_status === 'insurance')
-        .reduce((s, v) => s + parseFloat(v.cost || 0), 0);
-    const partial = visits
-        .filter(v => v.payment_status === 'partial')
-        .reduce((s, v) => s + parseFloat(v.cost || 0) * 0.5, 0);
-    const outstanding = billed - paid - partial;
+    const collected = visits.reduce((sum, visit) => sum + getVisitCollectedAmount(visit), 0);
+    const outstanding = visits.reduce((sum, visit) => sum + getVisitOutstandingAmount(visit), 0);
 
     if (visits.length === 0) return null;
     return (
@@ -216,7 +306,7 @@ function FinancialSummary({ visits }) {
             </div>
             <div className="card p-3 sm:p-4 text-center border-t-[3px] border-t-green-500">
                 <p className="text-xs text-text-secondary uppercase tracking-wide font-medium">Collected</p>
-                <p className="text-lg font-bold text-green-700 mt-0.5">{formatCurrency(paid + partial)}</p>
+                <p className="text-lg font-bold text-green-700 mt-0.5">{formatCurrency(collected)}</p>
             </div>
             <div className={`card p-3 sm:p-4 text-center border-t-[3px] ${outstanding > 0 ? 'border-t-red-500' : 'border-t-gray-300'}`}>
                 <p className="text-xs text-text-secondary uppercase tracking-wide font-medium">Outstanding</p>
@@ -277,7 +367,11 @@ export default function VisitsTab({ patient }) {
     const handleMarkPaid = async (v) => {
         setMarkingPaid(v.id);
         try {
-            await client.put(`/patients/${patient.id}/visits/${v.id}`, { ...v, payment_status: 'paid' });
+            await client.put(`/patients/${patient.id}/visits/${v.id}`, {
+                ...v,
+                payment_status: 'paid',
+                partial_amount_paid: v.cost || '',
+            });
             toast.success('Marked as paid');
             fetchVisits();
         } catch {
@@ -345,6 +439,8 @@ export default function VisitsTab({ patient }) {
                 <div className="space-y-3">
                     {visits.map((v, i) => {
                         const payment = PAYMENT_STATUSES.find(p => p.value === v.payment_status);
+                        const partialCollected = getVisitCollectedAmount(v);
+                        const partialOutstanding = getVisitOutstandingAmount(v);
                         return (
                             <motion.div
                                 key={v.id}
@@ -363,6 +459,11 @@ export default function VisitsTab({ patient }) {
                                             ))}
                                             {payment && <span className={`badge text-xs ${payment.class}`}>{payment.label}</span>}
                                             {v.cost && <span className="text-xs font-medium text-text-secondary">{formatCurrency(v.cost)}</span>}
+                                            {v.payment_status === 'partial' && (
+                                                <span className="text-xs font-medium text-orange-600">
+                                                    Paid {formatCurrency(partialCollected)} | Balance {formatCurrency(partialOutstanding)}
+                                                </span>
+                                            )}
                                         </div>
                                         <p className="text-sm font-medium text-text-primary mb-1">{v.treatment_performed}</p>
                                         {v.chief_complaint && <p className="text-xs text-text-secondary">Complaint: {v.chief_complaint}</p>}

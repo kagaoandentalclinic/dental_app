@@ -68,7 +68,16 @@ function buildPatientSearchWhereClause(searchQuery, visitDate, outstandingOnly) 
                 SELECT 1
                 FROM visits v_balance
                 WHERE v_balance.patient_id = p.id
-                  AND v_balance.payment_status IN ('pending', 'partial')
+                  AND (
+                      v_balance.payment_status = 'pending'
+                      OR (
+                          v_balance.payment_status = 'partial'
+                          AND GREATEST(
+                              COALESCE(v_balance.cost, 0) - COALESCE(v_balance.partial_amount_paid, COALESCE(v_balance.cost, 0) * 0.5),
+                              0
+                          ) > 0
+                      )
+                  )
             )
             OR EXISTS (
                 SELECT 1

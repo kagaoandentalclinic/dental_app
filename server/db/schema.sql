@@ -258,6 +258,8 @@ CREATE TABLE IF NOT EXISTS visits (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+ALTER TABLE visits ADD COLUMN IF NOT EXISTS partial_amount_paid DECIMAL(10,2);
+
 -- ============================================
 -- ORTHODONTIC CASES
 -- ============================================

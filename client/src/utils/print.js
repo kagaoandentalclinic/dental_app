@@ -57,6 +57,13 @@ export function printVisitReceipt(visit, patient, clinic) {
         .join(', ');
     const paymentLabel = { pending:'Pending', paid:'Paid', insurance:'Insurance / HMO', partial:'Partial Payment' }[visit.payment_status] || visit.payment_status;
     const payColor = { pending:'#d97706', paid:'#059669', insurance:'#2563eb', partial:'#ea580c' }[visit.payment_status] || '#555';
+    const totalCost = parseFloat(visit.cost || 0);
+    const partialPaid = visit.payment_status === 'partial'
+        ? (Number.isFinite(parseFloat(visit.partial_amount_paid)) ? parseFloat(visit.partial_amount_paid) : totalCost * 0.5)
+        : 0;
+    const balanceRemaining = visit.payment_status === 'partial'
+        ? Math.max(0, totalCost - partialPaid)
+        : 0;
 
     const row = (label, value, bold = false) => value
         ? `<tr><td style="padding:4px 6px;color:#666;font-size:9pt;white-space:nowrap;">${label}</td>
@@ -109,13 +116,18 @@ export function printVisitReceipt(visit, patient, clinic) {
 
       <div class="section-title">Payment Summary</div>
       <div class="amount-box">
-        <div style="font-size:9pt;color:#666;text-transform:uppercase;letter-spacing:0.5px;">Amount Due</div>
+        <div style="font-size:9pt;color:#666;text-transform:uppercase;letter-spacing:0.5px;">Total Cost</div>
         <div style="font-size:28pt;font-weight:bold;color:#0a6352;">${visit.cost ? '₱' + parseFloat(visit.cost).toLocaleString('en-PH', { minimumFractionDigits:2, maximumFractionDigits:2 }) : '₱ —'}</div>
         <div style="margin-top:6px;">
           <span style="display:inline-block;padding:3px 14px;border-radius:20px;font-size:10pt;font-weight:bold;background:${payColor}20;color:${payColor};border:1.5px solid ${payColor};">
             ${paymentLabel}
           </span>
         </div>
+        ${visit.payment_status === 'partial' ? `
+        <div style="margin-top:12px;font-size:10pt;color:#444;display:grid;gap:4px;">
+          <div>Amount Paid: <strong>â‚±${partialPaid.toLocaleString('en-PH', { minimumFractionDigits:2, maximumFractionDigits:2 })}</strong></div>
+          <div>Balance Remaining: <strong>â‚±${balanceRemaining.toLocaleString('en-PH', { minimumFractionDigits:2, maximumFractionDigits:2 })}</strong></div>
+        </div>` : ''}
       </div>
 
       ${visit.notes ? `<div style="margin-top:8px;font-size:9pt;color:#555;font-style:italic;border:1px solid #ddd;padding:6px 10px;border-radius:3px;background:#fafafa;">Note: ${visit.notes}</div>` : ''}

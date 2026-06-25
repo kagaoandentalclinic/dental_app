@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Users, Calendar, Clock, Eye, AlertTriangle, Plus, ArrowRight } from 'lucide-react';
@@ -48,7 +48,7 @@ const STAT_CARDS = [
     },
 ];
 
-function StatCard({ icon: Icon, label, value, iconBg, iconColor, dot, to, hint, index }) {
+function StatCard({ icon: Icon, label, value, iconBg, iconColor, dot, to, hint, index, loading }) {
     return (
         <motion.div
             {...fadeUp(index)}
@@ -65,8 +65,10 @@ function StatCard({ icon: Icon, label, value, iconBg, iconColor, dot, to, hint, 
                 <div className="min-w-0 flex-1">
                     <p className="stat-label">{label}</p>
                     <p className="stat-value">
-                        {value ?? (
+                        {loading ? (
                             <span className="skeleton inline-block w-12 h-6 rounded" />
+                        ) : (
+                            value ?? '0'
                         )}
                     </p>
                     {/* Hint text slides up on hover */}
@@ -131,20 +133,38 @@ function SkeletonRow({ cols = 5 }) {
 export default function Dashboard() {
     const [stats, setStats] = useState(null);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState('');
+
+    const fetchStats = useCallback(async () => {
+        setLoading(true);
+        setError('');
+        try {
+            const res = await client.get('/dashboard/stats');
+            setStats(res.data);
+        } catch (err) {
+            console.error('Dashboard stats fetch failed', err);
+            setStats({
+                totalPatients: 0,
+                appointmentsToday: 0,
+                upcomingAppointments: 0,
+                recentPatients: [],
+                outstandingPatients: [],
+            });
+            setError(err.response?.data?.error || 'Failed to load dashboard stats.');
+        } finally {
+            setLoading(false);
+        }
+    }, []);
 
     useEffect(() => {
         let cancelled = false;
-        setLoading(true);
         (async () => {
-            try {
-                const res = await client.get('/dashboard/stats');
-                if (!cancelled) setStats(res.data);
-            } finally {
-                if (!cancelled) setLoading(false);
+            if (!cancelled) {
+                await fetchStats();
             }
         })();
         return () => { cancelled = true; };
-    }, []);
+    }, [fetchStats]);
 
     return (
         <div className="space-y-6 animate-fade-up">
@@ -192,11 +212,21 @@ export default function Dashboard() {
                         dot={cfg.dot}
                         to={cfg.to}
                         hint={cfg.hint}
+                        loading={loading}
                     />
                 ))}
             </div>
 
             {/* ── Revenue Overview Section ── */}
+            {error && (
+                <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                    <p className="text-sm text-amber-800">{error}</p>
+                    <button type="button" className="btn-secondary text-sm" onClick={fetchStats}>
+                        Retry
+                    </button>
+                </div>
+            )}
+
             <RevenueSection />
 
             {/* ── Tables Row ── */}

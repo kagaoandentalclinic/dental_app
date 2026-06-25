@@ -467,6 +467,7 @@ function OutstandingMiniList({ patients, loading }) {
 export default function RevenueSection() {
     const [data, setData] = useState(null);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState('');
     const [trendPeriod, setTrendPeriod] = useState('6m');
     const [customFrom, setCustomFrom] = useState('');
     const [customTo, setCustomTo] = useState('');
@@ -475,6 +476,7 @@ export default function RevenueSection() {
         // Don't fetch if custom but dates not both set
         if (period === 'custom' && (!from || !to)) return;
         setLoading(true);
+        setError('');
         try {
             const params = { trend: period };
             if (period === 'custom') {
@@ -485,6 +487,18 @@ export default function RevenueSection() {
             setData(res.data);
         } catch (err) {
             console.error('Revenue section fetch failed', err);
+            setData({
+                thisMonth: 0,
+                lastMonth: 0,
+                lastMonthName: '',
+                outstanding: 0,
+                outstandingPatientCount: 0,
+                collectionRate: 0,
+                trend: [],
+                services: {},
+                topOutstanding: [],
+            });
+            setError(err.response?.data?.error || 'Failed to load revenue data.');
         } finally {
             setLoading(false);
         }
@@ -525,6 +539,15 @@ export default function RevenueSection() {
     return (
         <div className="space-y-5">
             {/* ── Section header ── */}
+            {error && (
+                <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                    <p className="text-sm text-amber-800">{error}</p>
+                    <button type="button" className="btn-secondary text-sm" onClick={() => fetchRevenue(trendPeriod, customFrom, customTo)}>
+                        Retry
+                    </button>
+                </div>
+            )}
+
             <div className="flex items-center gap-2">
                 <BarChart2 className="w-4 h-4 text-[#0F6E56]" />
                 <h2 className="text-sm font-bold text-slate-700 uppercase tracking-wider">Revenue Overview</h2>

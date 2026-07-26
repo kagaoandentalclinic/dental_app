@@ -36,6 +36,44 @@ function parseVisitTypes(value) {
     return String(value).split(',').map(v => v.trim()).filter(Boolean);
 }
 
+const TREATMENT_OPTIONS = [
+    'Checkup and Oral Examination',
+    'Oral Prophylaxis / Cleaning',
+    'Tooth Filling',
+    'Tooth Extraction',
+    'Root Canal Treatment',
+    'Crown Placement',
+    'Emergency Dental Treatment',
+    'Dental Consultation',
+    'Teeth Whitening',
+    'Braces Adjustment',
+    'Denture Fitting',
+    'Dental Implant Procedure',
+    'Medication Prescription Only',
+];
+
+function getInitialTreatmentState(value) {
+    const normalizedValue = (value || '').trim();
+    if (!normalizedValue) {
+        return {
+            treatment_performed: '',
+            treatment_performed_other: '',
+        };
+    }
+
+    if (TREATMENT_OPTIONS.includes(normalizedValue)) {
+        return {
+            treatment_performed: normalizedValue,
+            treatment_performed_other: '',
+        };
+    }
+
+    return {
+        treatment_performed: 'Other',
+        treatment_performed_other: normalizedValue,
+    };
+}
+
 function getVisitCollectedAmount(visit) {
     const totalCost = parseFloat(visit.cost || 0);
     if (visit.payment_status === 'partial') {
@@ -101,12 +139,14 @@ function VisitTypeMultiPicker({ selected, onChange }) {
 function VisitForm({ patientId, visit, onSave, onClose }) {
     const toast = useToast();
     const [saving, setSaving] = useState(false);
+    const initialTreatmentState = getInitialTreatmentState(visit?.treatment_performed);
     const [form, setForm] = useState({
         visit_date: visit?.visit_date ? toLocalDateInput(visit.visit_date) : toLocalDateInput(new Date()),
         visit_types: parseVisitTypes(visit?.visit_type),   // array of selected types
         chief_complaint: visit?.chief_complaint || '',
         diagnosis: visit?.diagnosis || '',
-        treatment_performed: visit?.treatment_performed || '',
+        treatment_performed: initialTreatmentState.treatment_performed,
+        treatment_performed_other: initialTreatmentState.treatment_performed_other,
         teeth_treated: formatTeethTreated(visit?.teeth_treated),
         prescriptions: visit?.prescriptions || '',
         next_appointment: visit?.next_appointment ? toLocalDateInput(visit.next_appointment) : '',
@@ -124,11 +164,14 @@ function VisitForm({ patientId, visit, onSave, onClose }) {
     const remainingPreview = Number.isFinite(totalCostPreview)
         ? Math.max(0, totalCostPreview - (Number.isFinite(partialPaidPreview) ? partialPaidPreview : 0))
         : 0;
+    const effectiveTreatment = form.treatment_performed === 'Other'
+        ? form.treatment_performed_other.trim()
+        : form.treatment_performed.trim();
 
     const handleSubmit = async (e) => {
         e.preventDefault();
         if (form.visit_types.length === 0) { toast.error('Please select at least one visit type'); return; }
-        if (!form.treatment_performed.trim()) { toast.error('Treatment performed is required'); return; }
+        if (!effectiveTreatment) { toast.error('Treatment performed is required'); return; }
         if (form.payment_status === 'partial') {
             const cost = Number.parseFloat(form.cost);
             const partialAmount = Number.parseFloat(form.partial_amount_paid);
@@ -154,10 +197,12 @@ function VisitForm({ patientId, visit, onSave, onClose }) {
         try {
             const payload = {
                 ...form,
+                treatment_performed: effectiveTreatment,
                 visit_type: form.visit_types.join(','),  // store as comma-separated string
                 teeth_treated: parsedTeeth,
             };
             delete payload.visit_types;
+            delete payload.treatment_performed_other;
             if (visit) {
                 await client.put(`/patients/${patientId}/visits/${visit.id}`, payload);
                 toast.success('Visit updated successfully');
@@ -207,7 +252,21 @@ function VisitForm({ patientId, visit, onSave, onClose }) {
             </div>
             <div>
                 <label className="form-label">Treatment Performed *</label>
-                <textarea className="form-textarea" rows={3} placeholder="Describe the treatment performed..." value={form.treatment_performed} onChange={set('treatment_performed')} />
+                <select className="form-select" value={form.treatment_performed} onChange={set('treatment_performed')}>
+                    <option value="">Select treatment performed</option>
+                    {TREATMENT_OPTIONS.map((option) => (
+                        <option key={option} value={option}>{option}</option>
+                    ))}
+                    <option value="Other">Other</option>
+                </select>
+                {form.treatment_performed === 'Other' && (
+                    <input
+                        className="form-input mt-3"
+                        placeholder="Specify the treatment performed..."
+                        value={form.treatment_performed_other}
+                        onChange={set('treatment_performed_other')}
+                    />
+                )}
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>

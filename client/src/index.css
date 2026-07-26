@@ -259,11 +259,11 @@
 }
 
 .back-button {
-  @apply inline-flex w-fit items-center rounded-2xl bg-primary px-5 py-3 text-sm font-semibold text-white no-underline transition-all duration-200 shadow-sm;
+  @apply inline-flex w-fit items-center rounded-xl border border-slate-200 bg-white/90 px-4 py-2.5 text-sm font-semibold text-slate-600 no-underline transition-all duration-200 shadow-sm backdrop-blur-sm;
 }
 
 .back-button:hover {
-  @apply bg-primary-light shadow-btn;
+  @apply border-slate-300 bg-slate-50 text-slate-800 shadow-md;
 }
 
 .back-button:active {
@@ -271,15 +271,19 @@
 }
 
 .back-button:focus-visible {
-  @apply outline-none ring-2 ring-primary/30 ring-offset-2 ring-offset-white;
+  @apply outline-none ring-2 ring-primary/20 ring-offset-2 ring-offset-white;
 }
 
 .back-button__content {
-  @apply flex items-center gap-2;
+  @apply flex items-center gap-2.5;
 }
 
 .back-button__icon {
-  @apply h-4 w-4 shrink-0;
+  @apply h-4 w-4 shrink-0 text-primary transition-transform duration-200;
+}
+
+.back-button:hover .back-button__icon {
+  transform: translateX(-2px);
 }
 
 @keyframes fadeUp {

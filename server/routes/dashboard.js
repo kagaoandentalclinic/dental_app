@@ -23,6 +23,67 @@ const visitOutstandingAmountSql = (alias = 'v') => `
     END
 `;
 
+const orthoOutstandingAmountSql = (alias = 'oc') => `
+    GREATEST(COALESCE(${alias}.total_cost, 0) - COALESCE(${alias}.total_paid, 0), 0)
+`;
+
+const revenueDateSql = {
+    activity: {
+        visit: (alias = 'v') => `${alias}.visit_date`,
+        orthoCase: (alias = 'oc') => `${alias}.start_date::timestamptz`,
+        orthoAdjustment: (alias = 'oa') => `${alias}.adjustment_date::timestamptz`,
+    },
+    recorded: {
+        visit: (alias = 'v') => `${alias}.created_at`,
+        orthoCase: (alias = 'oc') => `${alias}.created_at`,
+        orthoAdjustment: (alias = 'oa') => `${alias}.created_at`,
+    },
+};
+
+const DATE_PARAM_RE = /^\d{4}-\d{2}-\d{2}$/;
+const allowedRevenueSources = ['all', 'visits', 'orthodontics'];
+const allowedRevenueMetrics = ['collected', 'outstanding'];
+
+function mapRevenueDrilldownRow(row) {
+    return {
+        entryId: row.entry_id,
+        patientId: row.patient_id,
+        patientName: [row.last_name, row.first_name].filter(Boolean).join(', '),
+        profilePhoto: row.profile_photo,
+        sourceType: row.source_type,
+        label: row.label,
+        amount: parseFloat(row.amount || 0),
+        activityAt: row.activity_at,
+        recordedAt: row.recorded_at,
+        referenceAt: row.reference_at,
+        details: row.details || '',
+    };
+}
+
+function summarizeRevenueDrilldown(rows) {
+    const labelByType = {
+        visit: 'Visits',
+        ortho_downpayment: 'Orthodontic downpayments',
+        ortho_adjustment: 'Orthodontic adjustments',
+        ortho_balance: 'Orthodontic balances',
+    };
+
+    return Object.entries(
+        rows.reduce((acc, row) => {
+            const current = acc[row.sourceType] || { total: 0, count: 0 };
+            current.total += row.amount;
+            current.count += 1;
+            acc[row.sourceType] = current;
+            return acc;
+        }, {})
+    ).map(([sourceType, summary]) => ({
+        sourceType,
+        label: labelByType[sourceType] || sourceType,
+        total: summary.total,
+        count: summary.count,
+    })).sort((a, b) => b.total - a.total);
+}
+
 // GET /api/dashboard/stats
 router.get('/stats', verifyToken, async (req, res) => {
     try {
@@ -129,11 +190,11 @@ router.get('/stats', verifyToken, async (req, res) => {
           SELECT
             p.id, p.last_name, p.first_name, p.profile_photo,
             0 AS visit_count,
-            (oc.total_cost - oc.total_paid) AS amount,
+            ${orthoOutstandingAmountSql('oc')} AS amount,
             oc.updated_at::date AS last_activity
           FROM orthodontic_cases oc
           JOIN patients p ON p.id = oc.patient_id AND p.is_active = true
-          WHERE oc.status = 'active' AND oc.total_paid < oc.total_cost
+          WHERE oc.status = 'active' AND ${orthoOutstandingAmountSql('oc')} > 0
         )
         SELECT
           id, last_name, first_name, profile_photo,
@@ -170,6 +231,9 @@ router.get('/revenue', verifyToken, async (req, res) => {
         const allowedTrend = ['3m', '6m', '1y', 'custom'];
         const trend = allowedTrend.includes(req.query.trend) ? req.query.trend : '6m';
         const trendMonths = trend === '3m' ? 3 : trend === '1y' ? 12 : 6;
+        const allowedDateBases = ['activity', 'recorded'];
+        const dateBasis = allowedDateBases.includes(req.query.dateBasis) ? req.query.dateBasis : 'activity';
+        const dateSql = revenueDateSql[dateBasis];
 
         // Custom date range validation (YYYY-MM-DD)
         let customFrom = null;
@@ -189,14 +253,19 @@ router.get('/revenue', verifyToken, async (req, res) => {
                 return res.json({
                     thisMonth: 0, lastMonth: 0, lastMonthName: '',
                     outstanding: 0, outstandingPatientCount: 0, collectionRate: 0,
+                    dateBasis,
                     trend: [], services: {}, topOutstanding: [],
                 });
             }
         }
 
+        const visitDateExpr = dateSql.visit('v');
+        const orthoCaseDateExpr = dateSql.orthoCase('oc');
+        const orthoAdjustmentDateExpr = dateSql.orthoAdjustment('oa');
+
         // ── Revenue helpers using visits + ortho tables ────────────────
         // Collected revenue = paid visits + ortho downpayments + ortho adjustments
-        // Outstanding = pending + partial (50%) + active ortho balance
+        // dateBasis controls whether filters use the activity date or the record entry date.
 
         const [
             thisMonthVisitRes,
@@ -205,10 +274,14 @@ router.get('/revenue', verifyToken, async (req, res) => {
             lastMonthOrthoRes,
             outstandingVisitRes,
             outstandingOrthoRes,
+            outstandingPatientCountRes,
             trendRes,
             serviceRes,
             orthoServiceRes,
             topOutstandingRes,
+            lifetimeVisitBilledRes,
+            lifetimeVisitCollectedRes,
+            lifetimeOrthoFinancialsRes,
         ] = await Promise.all([
 
             // ── This month collected (visits) ──────────────────────────
@@ -216,7 +289,7 @@ router.get('/revenue', verifyToken, async (req, res) => {
                 SELECT COALESCE(SUM(${visitCollectedAmountSql('v')}), 0) AS total
                 FROM visits v
                 JOIN patients p ON p.id = v.patient_id AND p.is_active = true
-                WHERE date_trunc('month', v.visit_date) = date_trunc('month', CURRENT_DATE)
+                WHERE date_trunc('month', ${visitDateExpr}) = date_trunc('month', CURRENT_DATE)
             `),
 
             // ── Last month collected (visits) ──────────────────────────
@@ -224,7 +297,7 @@ router.get('/revenue', verifyToken, async (req, res) => {
                 SELECT COALESCE(SUM(${visitCollectedAmountSql('v')}), 0) AS total
                 FROM visits v
                 JOIN patients p ON p.id = v.patient_id AND p.is_active = true
-                WHERE date_trunc('month', v.visit_date) = date_trunc('month', CURRENT_DATE - INTERVAL '1 month')
+                WHERE date_trunc('month', ${visitDateExpr}) = date_trunc('month', CURRENT_DATE - INTERVAL '1 month')
             `),
 
             // ── This month ortho (downpayments + adjustments) ──────────
@@ -234,13 +307,13 @@ router.get('/revenue', verifyToken, async (req, res) => {
                         SELECT COALESCE(SUM(oc.downpayment), 0)
                         FROM orthodontic_cases oc
                         JOIN patients p ON p.id = oc.patient_id AND p.is_active = true
-                        WHERE date_trunc('month', oc.start_date::timestamptz) = date_trunc('month', CURRENT_DATE)
+                        WHERE date_trunc('month', ${orthoCaseDateExpr}) = date_trunc('month', CURRENT_DATE)
                     ) +
                     (
                         SELECT COALESCE(SUM(oa.amount_paid), 0)
                         FROM orthodontic_adjustments oa
                         JOIN patients p ON p.id = oa.patient_id AND p.is_active = true
-                        WHERE date_trunc('month', oa.adjustment_date::timestamptz) = date_trunc('month', CURRENT_DATE)
+                        WHERE date_trunc('month', ${orthoAdjustmentDateExpr}) = date_trunc('month', CURRENT_DATE)
                     ) AS total
             `),
 
@@ -251,21 +324,19 @@ router.get('/revenue', verifyToken, async (req, res) => {
                         SELECT COALESCE(SUM(oc.downpayment), 0)
                         FROM orthodontic_cases oc
                         JOIN patients p ON p.id = oc.patient_id AND p.is_active = true
-                        WHERE date_trunc('month', oc.start_date::timestamptz) = date_trunc('month', CURRENT_DATE - INTERVAL '1 month')
+                        WHERE date_trunc('month', ${orthoCaseDateExpr}) = date_trunc('month', CURRENT_DATE - INTERVAL '1 month')
                     ) +
                     (
                         SELECT COALESCE(SUM(oa.amount_paid), 0)
                         FROM orthodontic_adjustments oa
                         JOIN patients p ON p.id = oa.patient_id AND p.is_active = true
-                        WHERE date_trunc('month', oa.adjustment_date::timestamptz) = date_trunc('month', CURRENT_DATE - INTERVAL '1 month')
+                        WHERE date_trunc('month', ${orthoAdjustmentDateExpr}) = date_trunc('month', CURRENT_DATE - INTERVAL '1 month')
                     ) AS total
             `),
 
             // ── Outstanding visits ─────────────────────────────────────
             pool.query(`
-                SELECT
-                    COALESCE(SUM(${visitOutstandingAmountSql('v')}), 0) AS total,
-                    COUNT(DISTINCT v.patient_id) FILTER (WHERE ${visitOutstandingAmountSql('v')} > 0) AS patient_count
+                SELECT COALESCE(SUM(${visitOutstandingAmountSql('v')}), 0) AS total
                 FROM visits v
                 JOIN patients p ON p.id = v.patient_id AND p.is_active = true
                 WHERE v.payment_status IN ('pending', 'partial')
@@ -273,71 +344,93 @@ router.get('/revenue', verifyToken, async (req, res) => {
 
             // ── Outstanding ortho balances ─────────────────────────────
             pool.query(`
-                SELECT
-                    COALESCE(SUM(oc.total_cost - oc.total_paid), 0) AS total,
-                    COUNT(DISTINCT oc.patient_id) AS patient_count
+                SELECT COALESCE(SUM(${orthoOutstandingAmountSql('oc')}), 0) AS total
                 FROM orthodontic_cases oc
                 JOIN patients p ON p.id = oc.patient_id AND p.is_active = true
-                WHERE oc.status = 'active' AND oc.total_paid < oc.total_cost
+                WHERE oc.status = 'active' AND ${orthoOutstandingAmountSql('oc')} > 0
+            `),
+
+            pool.query(`
+                WITH outstanding_patients AS (
+                    SELECT DISTINCT v.patient_id
+                    FROM visits v
+                    JOIN patients p ON p.id = v.patient_id AND p.is_active = true
+                    WHERE v.payment_status IN ('pending', 'partial')
+                      AND ${visitOutstandingAmountSql('v')} > 0
+
+                    UNION
+
+                    SELECT DISTINCT oc.patient_id
+                    FROM orthodontic_cases oc
+                    JOIN patients p ON p.id = oc.patient_id AND p.is_active = true
+                    WHERE oc.status = 'active'
+                      AND ${orthoOutstandingAmountSql('oc')} > 0
+                )
+                SELECT COUNT(*) AS total
+                FROM outstanding_patients
             `),
 
             // ── Revenue trend (per month) ──────────────────────────────
             trend === 'custom'
                 ? pool.query(`
-                    WITH months AS (
+                    WITH days AS (
                         SELECT generate_series(
-                            date_trunc('month', $1::date),
-                            date_trunc('month', ($2::date - INTERVAL '1 day')),
-                            '1 month'
-                        ) AS month_start
+                            $1::date,
+                            ($2::date - INTERVAL '1 day')::date,
+                            '1 day'
+                        ) AS day_start
                     ),
                     visit_data AS (
                         SELECT
-                            date_trunc('month', v.visit_date) AS month_start,
+                            date_trunc('day', ${visitDateExpr}) AS day_start,
                             SUM(${visitCollectedAmountSql('v')}) AS collected,
                             SUM(${visitOutstandingAmountSql('v')}) AS outstanding
                         FROM visits v
                         JOIN patients p ON p.id = v.patient_id AND p.is_active = true
-                        WHERE v.visit_date >= $1::timestamptz
-                          AND v.visit_date <  $2::timestamptz
+                        WHERE ${visitDateExpr} >= $1::timestamptz
+                          AND ${visitDateExpr} <  $2::timestamptz
                         GROUP BY 1
                     ),
                     ortho_data AS (
                         SELECT
-                            month_start,
-                            SUM(collected) AS collected
+                            day_start,
+                            SUM(collected) AS collected,
+                            SUM(outstanding) AS outstanding
                         FROM (
                             SELECT
-                                date_trunc('month', oc.start_date::timestamptz) AS month_start,
-                                SUM(COALESCE(oc.downpayment, 0)) AS collected
+                                date_trunc('day', ${orthoCaseDateExpr}) AS day_start,
+                                SUM(COALESCE(oc.downpayment, 0)) AS collected,
+                                SUM(GREATEST(COALESCE(oc.total_cost, 0) - COALESCE(oc.downpayment, 0), 0)) AS outstanding
                             FROM orthodontic_cases oc
                             JOIN patients p ON p.id = oc.patient_id AND p.is_active = true
-                            WHERE oc.start_date >= $1::date
-                              AND oc.start_date <  $2::date
+                            WHERE ${orthoCaseDateExpr} >= $1::timestamptz
+                              AND ${orthoCaseDateExpr} <  $2::timestamptz
                             GROUP BY 1
 
                             UNION ALL
 
                             SELECT
-                                date_trunc('month', oa.adjustment_date::timestamptz) AS month_start,
-                                SUM(COALESCE(oa.amount_paid, 0)) AS collected
+                                date_trunc('day', ${orthoAdjustmentDateExpr}) AS day_start,
+                                SUM(COALESCE(oa.amount_paid, 0)) AS collected,
+                                0 AS outstanding
                             FROM orthodontic_adjustments oa
                             JOIN patients p ON p.id = oa.patient_id AND p.is_active = true
-                            WHERE oa.adjustment_date >= $1::date
-                              AND oa.adjustment_date <  $2::date
+                            WHERE ${orthoAdjustmentDateExpr} >= $1::timestamptz
+                              AND ${orthoAdjustmentDateExpr} <  $2::timestamptz
                             GROUP BY 1
                         ) ortho_payments
-                        GROUP BY month_start
+                        GROUP BY day_start
                     )
                     SELECT
-                        to_char(m.month_start, 'Mon YYYY') AS month_label,
-                        m.month_start,
+                        to_char(d.day_start, 'Mon DD, YYYY') AS month_label,
+                        d.day_start AS month_start,
+                        d.day_start + INTERVAL '1 day' AS bucket_end,
                         COALESCE(vd.collected, 0) + COALESCE(od.collected, 0) AS collected,
-                        COALESCE(vd.outstanding, 0) AS outstanding
-                    FROM months m
-                    LEFT JOIN visit_data vd ON vd.month_start = m.month_start
-                    LEFT JOIN ortho_data od ON od.month_start = m.month_start
-                    ORDER BY m.month_start ASC
+                        COALESCE(vd.outstanding, 0) + COALESCE(od.outstanding, 0) AS outstanding
+                    FROM days d
+                    LEFT JOIN visit_data vd ON vd.day_start = d.day_start
+                    LEFT JOIN ortho_data od ON od.day_start = d.day_start
+                    ORDER BY d.day_start ASC
                 `, [customFrom, customTo])
                 : pool.query(`
                     WITH months AS (
@@ -349,35 +442,38 @@ router.get('/revenue', verifyToken, async (req, res) => {
                     ),
                     visit_data AS (
                         SELECT
-                            date_trunc('month', v.visit_date) AS month_start,
+                            date_trunc('month', ${visitDateExpr}) AS month_start,
                             SUM(${visitCollectedAmountSql('v')}) AS collected,
                             SUM(${visitOutstandingAmountSql('v')}) AS outstanding
                         FROM visits v
                         JOIN patients p ON p.id = v.patient_id AND p.is_active = true
-                        WHERE v.visit_date >= date_trunc('month', CURRENT_DATE - ($1 || ' months')::interval)
+                        WHERE ${visitDateExpr} >= date_trunc('month', CURRENT_DATE - ($1 || ' months')::interval)
                         GROUP BY 1
                     ),
                     ortho_data AS (
                         SELECT
                             month_start,
-                            SUM(collected) AS collected
+                            SUM(collected) AS collected,
+                            SUM(outstanding) AS outstanding
                         FROM (
                             SELECT
-                                date_trunc('month', oc.start_date::timestamptz) AS month_start,
-                                SUM(COALESCE(oc.downpayment, 0)) AS collected
+                                date_trunc('month', ${orthoCaseDateExpr}) AS month_start,
+                                SUM(COALESCE(oc.downpayment, 0)) AS collected,
+                                SUM(GREATEST(COALESCE(oc.total_cost, 0) - COALESCE(oc.downpayment, 0), 0)) AS outstanding
                             FROM orthodontic_cases oc
                             JOIN patients p ON p.id = oc.patient_id AND p.is_active = true
-                            WHERE oc.start_date >= (CURRENT_DATE - ($1 || ' months')::interval)::date
+                            WHERE ${orthoCaseDateExpr} >= date_trunc('month', CURRENT_DATE - ($1 || ' months')::interval)
                             GROUP BY 1
 
                             UNION ALL
 
                             SELECT
-                                date_trunc('month', oa.adjustment_date::timestamptz) AS month_start,
-                                SUM(COALESCE(oa.amount_paid, 0)) AS collected
+                                date_trunc('month', ${orthoAdjustmentDateExpr}) AS month_start,
+                                SUM(COALESCE(oa.amount_paid, 0)) AS collected,
+                                0 AS outstanding
                             FROM orthodontic_adjustments oa
                             JOIN patients p ON p.id = oa.patient_id AND p.is_active = true
-                            WHERE oa.adjustment_date >= (CURRENT_DATE - ($1 || ' months')::interval)::date
+                            WHERE ${orthoAdjustmentDateExpr} >= date_trunc('month', CURRENT_DATE - ($1 || ' months')::interval)
                             GROUP BY 1
                         ) ortho_payments
                         GROUP BY month_start
@@ -385,8 +481,9 @@ router.get('/revenue', verifyToken, async (req, res) => {
                     SELECT
                         to_char(m.month_start, 'Mon') AS month_label,
                         m.month_start,
+                        m.month_start + INTERVAL '1 month' AS bucket_end,
                         COALESCE(vd.collected, 0) + COALESCE(od.collected, 0) AS collected,
-                        COALESCE(vd.outstanding, 0) AS outstanding
+                        COALESCE(vd.outstanding, 0) + COALESCE(od.outstanding, 0) AS outstanding
                     FROM months m
                     LEFT JOIN visit_data vd ON vd.month_start = m.month_start
                     LEFT JOIN ortho_data od ON od.month_start = m.month_start
@@ -400,7 +497,7 @@ router.get('/revenue', verifyToken, async (req, res) => {
                     COALESCE(SUM(${visitCollectedAmountSql('v')}), 0) AS total
                 FROM visits v
                 JOIN patients p ON p.id = v.patient_id AND p.is_active = true
-                WHERE date_trunc('month', v.visit_date) = date_trunc('month', CURRENT_DATE)
+                WHERE date_trunc('month', ${visitDateExpr}) = date_trunc('month', CURRENT_DATE)
                 GROUP BY LOWER(TRIM(v.visit_type))
                 ORDER BY total DESC
             `),
@@ -411,13 +508,13 @@ router.get('/revenue', verifyToken, async (req, res) => {
                         SELECT COALESCE(SUM(oc.downpayment), 0)
                         FROM orthodontic_cases oc
                         JOIN patients p ON p.id = oc.patient_id AND p.is_active = true
-                        WHERE date_trunc('month', oc.start_date::timestamptz) = date_trunc('month', CURRENT_DATE)
+                        WHERE date_trunc('month', ${orthoCaseDateExpr}) = date_trunc('month', CURRENT_DATE)
                     ) +
                     (
                         SELECT COALESCE(SUM(oa.amount_paid), 0)
                         FROM orthodontic_adjustments oa
                         JOIN patients p ON p.id = oa.patient_id AND p.is_active = true
-                        WHERE date_trunc('month', oa.adjustment_date::timestamptz) = date_trunc('month', CURRENT_DATE)
+                        WHERE date_trunc('month', ${orthoAdjustmentDateExpr}) = date_trunc('month', CURRENT_DATE)
                     ) AS total
             `),
 
@@ -437,11 +534,11 @@ router.get('/revenue', verifyToken, async (req, res) => {
 
                     SELECT
                         p.id, p.last_name, p.first_name, p.profile_photo,
-                        (oc.total_cost - oc.total_paid) AS amount,
+                        ${orthoOutstandingAmountSql('oc')} AS amount,
                         oc.updated_at::date AS last_visit
                     FROM orthodontic_cases oc
                     JOIN patients p ON p.id = oc.patient_id AND p.is_active = true
-                    WHERE oc.status = 'active' AND oc.total_paid < oc.total_cost
+                    WHERE oc.status = 'active' AND ${orthoOutstandingAmountSql('oc')} > 0
                 )
                 SELECT
                     id, last_name, first_name, profile_photo,
@@ -451,6 +548,26 @@ router.get('/revenue', verifyToken, async (req, res) => {
                 GROUP BY id, last_name, first_name, profile_photo
                 ORDER BY outstanding_amount DESC
                 LIMIT 5
+            `),
+
+            pool.query(`
+                SELECT COALESCE(SUM(COALESCE(v.cost, 0)), 0) AS total
+                FROM visits v
+                JOIN patients p ON p.id = v.patient_id AND p.is_active = true
+            `),
+
+            pool.query(`
+                SELECT COALESCE(SUM(${visitCollectedAmountSql('v')}), 0) AS total
+                FROM visits v
+                JOIN patients p ON p.id = v.patient_id AND p.is_active = true
+            `),
+
+            pool.query(`
+                SELECT
+                    COALESCE(SUM(COALESCE(oc.total_cost, 0)), 0) AS billed,
+                    COALESCE(SUM(COALESCE(oc.total_paid, 0)), 0) AS collected
+                FROM orthodontic_cases oc
+                JOIN patients p ON p.id = oc.patient_id AND p.is_active = true
             `),
         ]);
 
@@ -466,14 +583,17 @@ router.get('/revenue', verifyToken, async (req, res) => {
             parseFloat(outstandingVisitRes.rows[0].total) +
             parseFloat(outstandingOrthoRes.rows[0].total);
 
-        const outstandingPatientCount =
-            parseInt(outstandingVisitRes.rows[0].patient_count) +
-            parseInt(outstandingOrthoRes.rows[0].patient_count);
+        const outstandingPatientCount = parseInt(outstandingPatientCountRes.rows[0].total, 10) || 0;
 
-        // Collection rate = collected / (collected + outstanding) * 100
-        const totalBilled = thisMonthCollected + outstandingTotal;
+        // Collection rate = all collected revenue / all billed revenue
+        const totalCollected =
+            parseFloat(lifetimeVisitCollectedRes.rows[0].total) +
+            parseFloat(lifetimeOrthoFinancialsRes.rows[0].collected);
+        const totalBilled =
+            parseFloat(lifetimeVisitBilledRes.rows[0].total) +
+            parseFloat(lifetimeOrthoFinancialsRes.rows[0].billed);
         const collectionRate = totalBilled > 0
-            ? Math.round((thisMonthCollected / totalBilled) * 100)
+            ? Math.min(100, Math.round((totalCollected / totalBilled) * 100))
             : 0;
 
         // ── Service breakdown — map visit_type to 6 categories ──────────
@@ -511,16 +631,169 @@ router.get('/revenue', verifyToken, async (req, res) => {
             thisMonth: thisMonthCollected,
             lastMonth: lastMonthCollected,
             lastMonthName,
+            dateBasis,
             outstanding: outstandingTotal,
             outstandingPatientCount,
             collectionRate,
             trend: trendRes.rows.map(r => ({
                 label: r.month_label,
+                bucketStart: r.month_start,
+                bucketEnd: r.bucket_end,
                 collected: parseFloat(r.collected),
                 outstanding: parseFloat(r.outstanding),
             })),
             services: serviceBreakdown,
             topOutstanding: topOutstandingRes.rows,
+        });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+router.get('/revenue/drilldown', verifyToken, async (req, res) => {
+    try {
+        const allowedDateBases = ['activity', 'recorded'];
+        const dateBasis = allowedDateBases.includes(req.query.dateBasis) ? req.query.dateBasis : 'activity';
+        const source = allowedRevenueSources.includes(req.query.source) ? req.query.source : 'all';
+        const metric = allowedRevenueMetrics.includes(req.query.metric) ? req.query.metric : 'collected';
+        const dateSql = revenueDateSql[dateBasis];
+
+        const startDate = req.query.startDate;
+        const endDate = req.query.endDate;
+
+        if (!DATE_PARAM_RE.test(startDate || '') || !DATE_PARAM_RE.test(endDate || '')) {
+            return res.status(400).json({ error: 'startDate and endDate are required in YYYY-MM-DD format.' });
+        }
+
+        const visitDateExpr = dateSql.visit('v');
+        const orthoCaseDateExpr = dateSql.orthoCase('oc');
+        const orthoAdjustmentDateExpr = dateSql.orthoAdjustment('oa');
+        const visitAmountExpr = metric === 'collected'
+            ? visitCollectedAmountSql('v')
+            : visitOutstandingAmountSql('v');
+        const visitAmountWhere = metric === 'collected'
+            ? `${visitAmountExpr} > 0`
+            : `v.payment_status IN ('pending', 'partial') AND ${visitAmountExpr} > 0`;
+        const orthoBalanceExpr = orthoOutstandingAmountSql('oc');
+        const orthoCreatedOutstandingExpr = `
+            GREATEST(COALESCE(oc.total_cost, 0) - COALESCE(oc.downpayment, 0), 0)
+        `;
+
+        const queries = [];
+
+        if (source === 'all' || source === 'visits') {
+            queries.push(pool.query(`
+                SELECT
+                    v.id AS entry_id,
+                    p.id AS patient_id,
+                    p.first_name,
+                    p.last_name,
+                    p.profile_photo,
+                    'visit' AS source_type,
+                    COALESCE(NULLIF(v.visit_type, ''), 'Visit') AS label,
+                    ${visitAmountExpr} AS amount,
+                    v.visit_date AS activity_at,
+                    v.created_at AS recorded_at,
+                    ${visitDateExpr} AS reference_at,
+                    COALESCE(v.payment_status, '') AS details
+                FROM visits v
+                JOIN patients p ON p.id = v.patient_id AND p.is_active = true
+                WHERE ${visitDateExpr} >= $1::timestamptz
+                  AND ${visitDateExpr} < $2::timestamptz
+                  AND ${visitAmountWhere}
+            `, [startDate, endDate]));
+        }
+
+        if (source === 'all' || source === 'orthodontics') {
+            if (metric === 'collected') {
+                queries.push(
+                    pool.query(`
+                        SELECT
+                            oc.id AS entry_id,
+                            p.id AS patient_id,
+                            p.first_name,
+                            p.last_name,
+                            p.profile_photo,
+                            'ortho_downpayment' AS source_type,
+                            'Orthodontic downpayment' AS label,
+                            COALESCE(oc.downpayment, 0) AS amount,
+                            oc.start_date::timestamptz AS activity_at,
+                            oc.created_at AS recorded_at,
+                            ${orthoCaseDateExpr} AS reference_at,
+                            COALESCE(oc.status, '') AS details
+                        FROM orthodontic_cases oc
+                        JOIN patients p ON p.id = oc.patient_id AND p.is_active = true
+                        WHERE ${orthoCaseDateExpr} >= $1::timestamptz
+                          AND ${orthoCaseDateExpr} < $2::timestamptz
+                          AND COALESCE(oc.downpayment, 0) > 0
+                    `, [startDate, endDate]),
+                    pool.query(`
+                        SELECT
+                            oa.id AS entry_id,
+                            p.id AS patient_id,
+                            p.first_name,
+                            p.last_name,
+                            p.profile_photo,
+                            'ortho_adjustment' AS source_type,
+                            'Orthodontic adjustment' AS label,
+                            COALESCE(oa.amount_paid, 0) AS amount,
+                            oa.adjustment_date::timestamptz AS activity_at,
+                            oa.created_at AS recorded_at,
+                            ${orthoAdjustmentDateExpr} AS reference_at,
+                            COALESCE(oa.notes, '') AS details
+                        FROM orthodontic_adjustments oa
+                        JOIN patients p ON p.id = oa.patient_id AND p.is_active = true
+                        WHERE ${orthoAdjustmentDateExpr} >= $1::timestamptz
+                          AND ${orthoAdjustmentDateExpr} < $2::timestamptz
+                          AND COALESCE(oa.amount_paid, 0) > 0
+                    `, [startDate, endDate])
+                );
+            } else {
+                queries.push(pool.query(`
+                    SELECT
+                        oc.id AS entry_id,
+                        p.id AS patient_id,
+                        p.first_name,
+                        p.last_name,
+                        p.profile_photo,
+                        'ortho_balance' AS source_type,
+                        'Orthodontic balance after downpayment' AS label,
+                        ${orthoCreatedOutstandingExpr} AS amount,
+                        oc.start_date::timestamptz AS activity_at,
+                        oc.created_at AS recorded_at,
+                        ${orthoCaseDateExpr} AS reference_at,
+                        COALESCE(oc.status, '') AS details
+                    FROM orthodontic_cases oc
+                    JOIN patients p ON p.id = oc.patient_id AND p.is_active = true
+                    WHERE ${orthoCaseDateExpr} >= $1::timestamptz
+                      AND ${orthoCaseDateExpr} < $2::timestamptz
+                      AND ${orthoCreatedOutstandingExpr} > 0
+                `, [startDate, endDate]));
+            }
+        }
+
+        const results = await Promise.all(queries);
+        const rows = results
+            .flatMap(result => result.rows)
+            .map(mapRevenueDrilldownRow)
+            .sort((a, b) => {
+                const timeDiff = new Date(b.referenceAt).getTime() - new Date(a.referenceAt).getTime();
+                if (timeDiff !== 0) return timeDiff;
+                if (b.amount !== a.amount) return b.amount - a.amount;
+                return a.patientName.localeCompare(b.patientName);
+            });
+
+        res.json({
+            dateBasis,
+            source,
+            metric,
+            startDate,
+            endDate,
+            total: rows.reduce((sum, row) => sum + row.amount, 0),
+            count: rows.length,
+            breakdown: summarizeRevenueDrilldown(rows),
+            rows,
         });
     } catch (err) {
         console.error(err);

@@ -32,10 +32,7 @@ function CaseModal({ patientId, orthoCase, onSave, onClose }) {
         setSaving(true);
         try {
             if (orthoCase) {
-                await client.put(`/patients/${patientId}/orthodontics/${orthoCase.id}`, {
-                    ...form,
-                    total_paid: orthoCase.total_paid,
-                });
+                await client.put(`/patients/${patientId}/orthodontics/${orthoCase.id}`, form);
             } else {
                 await client.post(`/patients/${patientId}/orthodontics`, form);
             }
@@ -108,27 +105,41 @@ function CaseModal({ patientId, orthoCase, onSave, onClose }) {
 function PaymentModal({ patientId, orthoCase, onSave, onClose }) {
     const toast = useToast();
     const [saving, setSaving] = useState(false);
-    const [totalPaid, setTotalPaid] = useState(orthoCase?.total_paid || '');
+    const [amountPaid, setAmountPaid] = useState('');
+    const [paymentDate, setPaymentDate] = useState(toLocalDateInput(new Date()));
+    const [paymentNotes, setPaymentNotes] = useState('');
+
+    const totalCost = parseFloat(orthoCase?.total_cost) || 0;
+    const totalPaid = parseFloat(orthoCase?.total_paid) || 0;
+    const remaining = Math.max(0, totalCost - totalPaid);
+    const projectedRemaining = Math.max(0, remaining - (parseFloat(amountPaid) || 0));
 
     const handleSubmit = async (e) => {
         e.preventDefault();
         setSaving(true);
         try {
-            await client.put(`/patients/${patientId}/orthodontics/${orthoCase.id}`, {
-                bracket_type: orthoCase.bracket_type,
-                start_date: orthoCase.start_date,
-                estimated_end_date: orthoCase.estimated_end_date,
-                actual_end_date: orthoCase.actual_end_date,
-                total_cost: orthoCase.total_cost,
-                downpayment: orthoCase.downpayment,
-                total_paid: totalPaid,
-                status: orthoCase.status,
-                notes: orthoCase.notes,
+            const normalizedAmount = parseFloat(amountPaid) || 0;
+
+            if (normalizedAmount <= 0) {
+                toast.error('Enter a payment amount greater than zero');
+                return;
+            }
+
+            if (normalizedAmount > remaining) {
+                toast.error('Payment cannot exceed the remaining balance');
+                return;
+            }
+
+            await client.post(`/patients/${patientId}/orthodontics/${orthoCase.id}/adjustments`, {
+                adjustment_date: paymentDate,
+                amount_paid: normalizedAmount,
+                payment_notes: paymentNotes.trim(),
+                notes: 'Payment entry',
             });
-            toast.success('Payment updated!');
+            toast.success('Payment recorded!');
             onSave();
         } catch (err) {
-            toast.error('Failed to update payment');
+            toast.error(err.response?.data?.error || 'Failed to record payment');
         } finally {
             setSaving(false);
         }
@@ -139,25 +150,47 @@ function PaymentModal({ patientId, orthoCase, onSave, onClose }) {
             <div className="bg-bg rounded-xl p-4 space-y-2 text-sm">
                 <div className="flex justify-between"><span className="text-text-secondary">Total Cost:</span><span className="font-semibold">{formatCurrency(orthoCase.total_cost)}</span></div>
                 <div className="flex justify-between"><span className="text-text-secondary">Downpayment:</span><span className="font-semibold text-primary">{formatCurrency(orthoCase.downpayment)}</span></div>
+                <div className="flex justify-between"><span className="text-text-secondary">Paid to Date:</span><span className="font-semibold text-green-600">{formatCurrency(totalPaid)}</span></div>
+                <div className="flex justify-between"><span className="text-text-secondary">Remaining Balance:</span><span className="font-semibold">{formatCurrency(remaining)}</span></div>
             </div>
             <div>
-                <label className="form-label">Total Amount Paid to Date (PHP)</label>
+                <label className="form-label">Payment Date</label>
+                <input
+                    type="date"
+                    className="form-input"
+                    value={paymentDate}
+                    onChange={e => setPaymentDate(e.target.value)}
+                />
+            </div>
+            <div>
+                <label className="form-label">Amount Paid (PHP)</label>
                 <input
                     type="number"
+                    min="0"
+                    step="0.01"
                     className="form-input"
                     placeholder="0.00"
-                    value={totalPaid}
-                    onChange={e => setTotalPaid(e.target.value)}
+                    value={amountPaid}
+                    onChange={e => setAmountPaid(e.target.value)}
                     autoFocus
                 />
                 <p className="text-xs text-text-secondary mt-1">
-                    Remaining after this update: {formatCurrency(Math.max(0, (orthoCase.total_cost || 0) - (parseFloat(totalPaid) || 0)))}
+                    Remaining after this payment: {formatCurrency(projectedRemaining)}
                 </p>
+            </div>
+            <div>
+                <label className="form-label">Payment Notes <span className="text-text-secondary font-normal">(optional)</span></label>
+                <input
+                    className="form-input"
+                    placeholder="e.g. Cash, GCash, transfer"
+                    value={paymentNotes}
+                    onChange={e => setPaymentNotes(e.target.value)}
+                />
             </div>
             <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-3 pt-2">
                 <button type="button" className="btn-secondary w-full sm:w-auto" onClick={onClose}>Cancel</button>
                 <button type="submit" className="btn-primary w-full sm:w-auto" disabled={saving}>
-                    {saving ? 'Saving...' : 'Update Payment'}
+                    {saving ? 'Saving...' : 'Record Payment'}
                 </button>
             </div>
         </form>
@@ -369,7 +402,7 @@ export default function OrthodonticsTab({ patient }) {
                         <DollarSign className="w-4 h-4 text-primary" /> Payment Summary
                     </h3>
                     <button className="btn-secondary text-sm w-full sm:w-auto" onClick={() => setPaymentModal(true)}>
-                        Update Payment
+                        Record Payment
                     </button>
                 </div>
 
@@ -405,7 +438,7 @@ export default function OrthodonticsTab({ patient }) {
             </motion.div>
 
             {/* ── Payment History ── */}
-            {adjustments.length > 0 && (
+            {(parseFloat(orthoCase.downpayment) > 0 || adjustments.length > 0) && (
                 <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="card">
                     <h3 className="font-semibold text-text-primary flex items-center gap-2 mb-4">
                         <Receipt className="w-4 h-4 text-primary" /> Payment History
@@ -581,7 +614,7 @@ export default function OrthodonticsTab({ patient }) {
                 />
             </Modal>
 
-            <Modal isOpen={paymentModal} onClose={() => setPaymentModal(false)} title="Update Payment" size="sm">
+            <Modal isOpen={paymentModal} onClose={() => setPaymentModal(false)} title="Record Payment" size="sm">
                 <PaymentModal
                     patientId={patient.id}
                     orthoCase={orthoCase}

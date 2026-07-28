@@ -36,41 +36,79 @@ function parseVisitTypes(value) {
     return String(value).split(',').map(v => v.trim()).filter(Boolean);
 }
 
-const TREATMENT_OPTIONS = [
-    'Checkup and Oral Examination',
-    'Oral Prophylaxis / Cleaning',
-    'Tooth Filling',
-    'Tooth Extraction',
-    'Root Canal Treatment',
-    'Crown Placement',
-    'Emergency Dental Treatment',
-    'Dental Consultation',
-    'Teeth Whitening',
-    'Braces Adjustment',
-    'Denture Fitting',
-    'Dental Implant Procedure',
-    'Medication Prescription Only',
+function parseStoredTreatmentList(value) {
+    if (Array.isArray(value)) {
+        return value.map((item) => String(item).trim()).filter(Boolean);
+    }
+
+    const normalizedValue = String(value || '').trim();
+    if (!normalizedValue) return [];
+
+    if (normalizedValue.startsWith('[')) {
+        try {
+            const parsed = JSON.parse(normalizedValue);
+            if (Array.isArray(parsed)) {
+                return parsed.map((item) => String(item).trim()).filter(Boolean);
+            }
+        } catch {
+            // Fall back to legacy comma-separated parsing below.
+        }
+    }
+
+    return normalizedValue.split(',').map((item) => item.trim()).filter(Boolean);
+}
+
+const TREATMENT_OPTION_GROUPS = [
+    {
+        label: 'General Treatments',
+        options: [
+            'Checkup and Oral Examination',
+            'Oral Prophylaxis / Cleaning',
+            'Tooth Filling',
+            'Tooth Extraction',
+            'Root Canal Treatment',
+            'Crown Placement',
+            'Emergency Dental Treatment',
+            'Dental Consultation',
+            'Teeth Whitening',
+            'Braces Adjustment',
+            'Denture Fitting',
+            'Dental Implant Procedure',
+            'Medication Prescription Only',
+        ],
+    },
+    {
+        label: 'Tooth Restoration',
+        options: [
+            'Tooth Restoration - Class I',
+            'Tooth Restoration - Class II Mesial',
+            'Tooth Restoration - Class II Distal',
+            'Tooth Restoration - Class II MOD',
+            'Tooth Restoration - Class III',
+            'Tooth Restoration - Class IV',
+            'Tooth Restoration - Class V',
+        ],
+    },
 ];
 
+const TREATMENT_OPTIONS = TREATMENT_OPTION_GROUPS.flatMap((group) => group.options);
+const TREATMENT_OTHER_OPTION = 'Other';
+
 function getInitialTreatmentState(value) {
-    const normalizedValue = (value || '').trim();
-    if (!normalizedValue) {
+    const parsedTreatments = parseStoredTreatmentList(value);
+    if (parsedTreatments.length === 0) {
         return {
-            treatment_performed: '',
+            treatment_performed: [],
             treatment_performed_other: '',
         };
     }
 
-    if (TREATMENT_OPTIONS.includes(normalizedValue)) {
-        return {
-            treatment_performed: normalizedValue,
-            treatment_performed_other: '',
-        };
-    }
+    const selectedOptions = parsedTreatments.filter((item) => TREATMENT_OPTIONS.includes(item));
+    const customOptions = parsedTreatments.filter((item) => !TREATMENT_OPTIONS.includes(item));
 
     return {
-        treatment_performed: 'Other',
-        treatment_performed_other: normalizedValue,
+        treatment_performed: customOptions.length > 0 ? [...selectedOptions, TREATMENT_OTHER_OPTION] : selectedOptions,
+        treatment_performed_other: customOptions.join(', '),
     };
 }
 
@@ -136,6 +174,70 @@ function VisitTypeMultiPicker({ selected, onChange }) {
     );
 }
 
+function TreatmentMultiPicker({ selected, onChange }) {
+    const toggle = (value) => {
+        if (selected.includes(value)) {
+            onChange(selected.filter((item) => item !== value));
+        } else {
+            onChange([...selected, value]);
+        }
+    };
+
+    return (
+        <div className="space-y-3">
+            {TREATMENT_OPTION_GROUPS.map((group) => (
+                <div key={group.label}>
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-text-secondary mb-2">
+                        {group.label}
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                        {group.options.map((option) => {
+                            const active = selected.includes(option);
+                            return (
+                                <button
+                                    key={option}
+                                    type="button"
+                                    onClick={() => toggle(option)}
+                                    className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-all duration-150 ${
+                                        active
+                                            ? 'bg-primary text-white border-primary shadow-sm'
+                                            : 'bg-white text-slate-500 border-slate-200 hover:border-primary hover:text-primary'
+                                    }`}
+                                >
+                                    {option}
+                                </button>
+                            );
+                        })}
+                    </div>
+                </div>
+            ))}
+            <div>
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-text-secondary mb-2">
+                    Custom
+                </p>
+                <div className="flex flex-wrap gap-2">
+                    <button
+                        type="button"
+                        onClick={() => toggle(TREATMENT_OTHER_OPTION)}
+                        className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-all duration-150 ${
+                            selected.includes(TREATMENT_OTHER_OPTION)
+                                ? 'bg-primary text-white border-primary shadow-sm'
+                                : 'bg-white text-slate-500 border-slate-200 hover:border-primary hover:text-primary'
+                        }`}
+                    >
+                        Other
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function formatTreatmentPerformed(value) {
+    const treatments = parseStoredTreatmentList(value);
+    return treatments.join(', ');
+}
+
 function VisitForm({ patientId, visit, onSave, onClose }) {
     const toast = useToast();
     const [saving, setSaving] = useState(false);
@@ -158,20 +260,28 @@ function VisitForm({ patientId, visit, onSave, onClose }) {
 
     const set = (field) => (e) => setForm(f => ({ ...f, [field]: e.target.value }));
     const setVisitTypes = (types) => setForm(f => ({ ...f, visit_types: types }));
+    const setTreatments = (treatments) => setForm((f) => ({ ...f, treatment_performed: treatments }));
     const preventWheelChange = (e) => e.currentTarget.blur();
     const totalCostPreview = Number.parseFloat(form.cost);
     const partialPaidPreview = Number.parseFloat(form.partial_amount_paid);
     const remainingPreview = Number.isFinite(totalCostPreview)
         ? Math.max(0, totalCostPreview - (Number.isFinite(partialPaidPreview) ? partialPaidPreview : 0))
         : 0;
-    const effectiveTreatment = form.treatment_performed === 'Other'
-        ? form.treatment_performed_other.trim()
-        : form.treatment_performed.trim();
+    const customTreatment = form.treatment_performed_other.trim();
+    const effectiveTreatments = [
+        ...form.treatment_performed.filter((item) => item !== TREATMENT_OTHER_OPTION),
+        ...(form.treatment_performed.includes(TREATMENT_OTHER_OPTION) && customTreatment ? [customTreatment] : []),
+    ];
 
     const handleSubmit = async (e) => {
         e.preventDefault();
         if (form.visit_types.length === 0) { toast.error('Please select at least one visit type'); return; }
-        if (!effectiveTreatment) { toast.error('Treatment performed is required'); return; }
+        if (form.treatment_performed.length === 0) { toast.error('Please select at least one treatment performed'); return; }
+        if (form.treatment_performed.includes(TREATMENT_OTHER_OPTION) && !customTreatment) {
+            toast.error('Please specify the custom treatment performed');
+            return;
+        }
+        if (effectiveTreatments.length === 0) { toast.error('Treatment performed is required'); return; }
         if (form.payment_status === 'partial') {
             const cost = Number.parseFloat(form.cost);
             const partialAmount = Number.parseFloat(form.partial_amount_paid);
@@ -197,7 +307,7 @@ function VisitForm({ patientId, visit, onSave, onClose }) {
         try {
             const payload = {
                 ...form,
-                treatment_performed: effectiveTreatment,
+                treatment_performed: JSON.stringify(effectiveTreatments),
                 visit_type: form.visit_types.join(','),  // store as comma-separated string
                 teeth_treated: parsedTeeth,
             };
@@ -251,15 +361,21 @@ function VisitForm({ patientId, visit, onSave, onClose }) {
                 <input className="form-input" placeholder="Diagnosis..." value={form.diagnosis} onChange={set('diagnosis')} />
             </div>
             <div>
-                <label className="form-label">Treatment Performed *</label>
-                <select className="form-select" value={form.treatment_performed} onChange={set('treatment_performed')}>
-                    <option value="">Select treatment performed</option>
-                    {TREATMENT_OPTIONS.map((option) => (
-                        <option key={option} value={option}>{option}</option>
-                    ))}
-                    <option value="Other">Other</option>
-                </select>
-                {form.treatment_performed === 'Other' && (
+                <label className="form-label">
+                    Treatment Performed *
+                    {form.treatment_performed.length > 0 && (
+                        <span className="ml-2 text-primary font-semibold">
+                            ({form.treatment_performed.length} selected)
+                        </span>
+                    )}
+                </label>
+                <TreatmentMultiPicker selected={form.treatment_performed} onChange={setTreatments} />
+                {form.treatment_performed.length === 0 && (
+                    <p className="text-xs text-amber-500 mt-1.5 flex items-center gap-1">
+                        <span>âš </span> Select at least one treatment
+                    </p>
+                )}
+                {form.treatment_performed.includes(TREATMENT_OTHER_OPTION) && (
                     <input
                         className="form-input mt-3"
                         placeholder="Specify the treatment performed..."
@@ -522,9 +638,9 @@ export default function VisitsTab({ patient }) {
                                                 <span className="text-xs font-medium text-orange-600">
                                                     Paid {formatCurrency(partialCollected)} | Balance {formatCurrency(partialOutstanding)}
                                                 </span>
-                                            )}
-                                        </div>
-                                        <p className="text-sm font-medium text-text-primary mb-1">{v.treatment_performed}</p>
+                                        )}
+                                    </div>
+                                        <p className="text-sm font-medium text-text-primary mb-1">{formatTreatmentPerformed(v.treatment_performed)}</p>
                                         {v.chief_complaint && <p className="text-xs text-text-secondary">Complaint: {v.chief_complaint}</p>}
                                         {v.diagnosis && <p className="text-xs text-text-secondary">Diagnosis: {v.diagnosis}</p>}
                                         <div className="flex flex-wrap items-center gap-3 mt-2 text-xs text-text-secondary">

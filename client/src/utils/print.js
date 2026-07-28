@@ -41,6 +41,28 @@ function openPrintWindow(html) {
     win.document.close();
 }
 
+function formatTreatmentPerformed(value) {
+    if (Array.isArray(value)) {
+        return value.map((item) => String(item).trim()).filter(Boolean).join(', ');
+    }
+
+    const normalizedValue = String(value || '').trim();
+    if (!normalizedValue) return '';
+
+    if (normalizedValue.startsWith('[')) {
+        try {
+            const parsed = JSON.parse(normalizedValue);
+            if (Array.isArray(parsed)) {
+                return parsed.map((item) => String(item).trim()).filter(Boolean).join(', ');
+            }
+        } catch {
+            // Fall back to the plain string below.
+        }
+    }
+
+    return normalizedValue;
+}
+
 // ─── Visit Receipt ────────────────────────────────────────────────────────────
 
 export function printVisitReceipt(visit, patient, clinic) {
@@ -107,7 +129,7 @@ export function printVisitReceipt(visit, patient, clinic) {
       <table style="width:100%;border-collapse:collapse;">
         ${row('Visit Date:', date)}
         ${row('Visit Type:', visitType)}
-        ${row('Treatment Performed:', visit.treatment_performed || '')}
+        ${row('Treatment Performed:', formatTreatmentPerformed(visit.treatment_performed))}
         ${visit.teeth_treated ? row('Teeth Treated:', Array.isArray(visit.teeth_treated) ? visit.teeth_treated.join(', ') : visit.teeth_treated) : ''}
         ${row('Diagnosis:', visit.diagnosis || '')}
         ${row('Dentist:', visit.dentist_name || '')}

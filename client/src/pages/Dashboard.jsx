@@ -20,9 +20,7 @@ const STAT_CARDS = [
         key: 'totalPatients',
         icon: Users,
         label: 'Total Patients',
-        iconBg: 'bg-teal-50',
-        iconColor: 'text-teal-600',
-        dot: 'bg-teal-500',
+        color: 'primary',
         to: '/patients',
         hint: 'View all patients',
     },
@@ -30,9 +28,7 @@ const STAT_CARDS = [
         key: 'appointmentsToday',
         icon: Calendar,
         label: "Today's Appointments",
-        iconBg: 'bg-blue-50',
-        iconColor: 'text-blue-600',
-        dot: 'bg-blue-500',
+        color: 'info',
         to: '/appointments',
         hint: 'View today\'s schedule',
     },
@@ -40,50 +36,41 @@ const STAT_CARDS = [
         key: 'upcomingAppointments',
         icon: Clock,
         label: 'Upcoming (30d)',
-        iconBg: 'bg-violet-50',
-        iconColor: 'text-violet-600',
-        dot: 'bg-violet-500',
+        color: 'warning',
         to: '/appointments',
         hint: 'View upcoming appointments',
     },
 ];
 
-function StatCard({ icon: Icon, label, value, iconBg, iconColor, dot, to, hint, index, loading }) {
+// Literal class names so Tailwind's content scanner can see them (dynamic template
+// strings like `bg-${color}` aren't detected by the JIT scanner).
+const STAT_BOX_BG = {
+    primary: 'bg-primary',
+    info: 'bg-info',
+    warning: 'bg-warning',
+    danger: 'bg-danger',
+};
+
+function StatCard({ icon: Icon, label, value, color, to, hint, index, loading }) {
     return (
         <motion.div
             {...fadeUp(index)}
-            className="stat-card group cursor-pointer"
+            className={`stat-box ${STAT_BOX_BG[color]} group`}
         >
-            <Link
-                to={to}
-                className="flex items-center gap-4 w-full no-underline"
-            >
-                {/* Icon circle */}
-                <div className={`stat-icon ${iconBg} ${iconColor} transition-transform duration-200 group-hover:scale-110`}>
-                    <Icon className="w-5 h-5" />
-                </div>
-                <div className="min-w-0 flex-1">
-                    <p className="stat-label">{label}</p>
-                    <p className="stat-value">
-                        {loading ? (
-                            <span className="skeleton inline-block w-12 h-6 rounded" />
-                        ) : (
-                            value ?? '0'
-                        )}
-                    </p>
-                    {/* Hint text slides up on hover */}
-                    <p className="text-[11px] text-slate-400 font-medium mt-0.5
-                                  translate-y-1 opacity-0 group-hover:translate-y-0 group-hover:opacity-100
-                                  transition-all duration-200">
-                        {hint}
-                    </p>
-                </div>
-                {/* Arrow slides in on hover */}
-                <ArrowRight
-                    className="w-4 h-4 text-slate-300 shrink-0
-                               -translate-x-1 opacity-0 group-hover:translate-x-0 group-hover:opacity-100
-                               transition-all duration-200"
-                />
+            <Icon className="stat-box-icon w-24 h-24" strokeWidth={1.5} />
+
+            <Link to={to} className="stat-box-body no-underline">
+                {loading ? (
+                    <span className="inline-block w-16 h-8 rounded bg-white/25 animate-pulse" />
+                ) : (
+                    <p className="stat-box-value">{value ?? '0'}</p>
+                )}
+                <p className="stat-box-label">{label}</p>
+            </Link>
+
+            <Link to={to} className="stat-box-footer text-white no-underline">
+                {hint}
+                <ArrowRight className="w-3.5 h-3.5 transition-transform duration-200 group-hover:translate-x-1" />
             </Link>
         </motion.div>
     );
@@ -101,18 +88,8 @@ function PatientAvatar({ patient }) {
             />
         );
     }
-    // Deterministic pastel color from name
-    const colors = [
-        'bg-teal-100 text-teal-700',
-        'bg-blue-100 text-blue-700',
-        'bg-violet-100 text-violet-700',
-        'bg-amber-100 text-amber-700',
-        'bg-rose-100 text-rose-700',
-        'bg-emerald-100 text-emerald-700',
-    ];
-    const colorIdx = ((patient.first_name?.charCodeAt(0) || 0) + (patient.last_name?.charCodeAt(0) || 0)) % colors.length;
     return (
-        <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs shrink-0 ${colors[colorIdx]}`}>
+        <div className="w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs shrink-0 bg-slate-100 text-slate-600">
             {patient.first_name?.[0]}{patient.last_name?.[0]}
         </div>
     );
@@ -207,9 +184,7 @@ export default function Dashboard() {
                         icon={cfg.icon}
                         label={cfg.label}
                         value={stats?.[cfg.key]}
-                        iconBg={cfg.iconBg}
-                        iconColor={cfg.iconColor}
-                        dot={cfg.dot}
+                        color={cfg.color}
                         to={cfg.to}
                         hint={cfg.hint}
                         loading={loading}

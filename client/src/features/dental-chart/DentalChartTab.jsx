@@ -303,7 +303,7 @@ export default function DentalChartTab({ patient }) {
                     </div>
                 ) : (
                     <div className="rounded-3xl border border-border/50 bg-gradient-to-b from-pink-50/60 via-white to-white p-3 sm:p-5 lg:p-6 overflow-x-auto">
-                        <div className={`${isMobile ? 'min-w-[520px]' : 'min-w-0'} mx-auto w-full`}>
+                        <div className="min-w-0 mx-auto w-full">
                             <div className={`flex justify-between ${isMobile ? 'px-2 pb-3' : 'px-6 pb-2'}`}>
                                 <span className="text-xs font-semibold text-text-secondary uppercase tracking-wider">Patient's Right</span>
                                 <span className="text-xs font-semibold text-text-secondary uppercase tracking-wider">Patient's Left</span>

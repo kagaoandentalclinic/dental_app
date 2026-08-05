@@ -45,15 +45,6 @@ function Skeleton({ className = '', style }) {
     return <div className={`skeleton rounded ${className}`} style={style} />;
 }
 
-const AVATAR_COLORS = [
-    'bg-teal-100 text-teal-700',
-    'bg-blue-100 text-blue-700',
-    'bg-violet-100 text-violet-700',
-    'bg-amber-100 text-amber-700',
-    'bg-rose-100 text-rose-700',
-    'bg-emerald-100 text-emerald-700',
-];
-
 function PatientAvatar({ patient, size = 'sm' }) {
     const sz = size === 'sm' ? 'w-8 h-8 text-xs' : 'w-9 h-9 text-sm';
     if (patient?.profile_photo) {
@@ -66,9 +57,8 @@ function PatientAvatar({ patient, size = 'sm' }) {
         );
     }
 
-    const idx = ((patient?.first_name?.charCodeAt(0) || 0) + (patient?.last_name?.charCodeAt(0) || 0)) % AVATAR_COLORS.length;
     return (
-        <div className={`${sz} rounded-full flex items-center justify-center font-bold shrink-0 ${AVATAR_COLORS[idx]}`}>
+        <div className={`${sz} rounded-full flex items-center justify-center font-bold shrink-0 bg-slate-100 text-slate-600`}>
             {patient?.first_name?.[0]}{patient?.last_name?.[0]}
         </div>
     );
@@ -78,17 +68,17 @@ function MetricCard({ icon: Icon, iconBg, iconColor, label, value, sublabel, sub
     return (
         <motion.div
             {...fadeUp(index)}
-            className="bg-white rounded-2xl p-5 flex items-start gap-4 shadow-[0_1px_4px_rgba(0,0,0,0.06)] border border-slate-100 cursor-default"
+            className="card flex items-start gap-4 cursor-default"
         >
             <div className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 ${iconBg} ${iconColor}`}>
                 <Icon className="w-5 h-5" />
             </div>
             <div className="min-w-0 flex-1">
-                <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">{label}</p>
+                <p className="stat-label mb-1">{label}</p>
                 {loading ? (
                     <Skeleton className="h-7 w-28 mb-1" />
                 ) : (
-                    <p className={`text-2xl font-bold tabular-nums leading-tight ${flag || 'text-slate-800'}`}>{value}</p>
+                    <p className={`text-2xl font-bold tabular-nums leading-tight ${flag || 'text-text-primary'}`}>{value}</p>
                 )}
                 {loading ? (
                     <Skeleton className="h-3.5 w-24 mt-1" />
@@ -134,14 +124,14 @@ function RevenueTrendChart({
             {
                 label: 'Collected',
                 data: trend?.map((item) => item.collected) ?? [],
-                backgroundColor: '#1D9E75',
+                backgroundColor: '#0a6352',
                 borderRadius: 6,
                 borderSkipped: false,
             },
             {
                 label: 'Balance Created',
                 data: trend?.map((item) => item.outstanding) ?? [],
-                backgroundColor: 'rgba(226,75,74,0.55)',
+                backgroundColor: 'rgba(239,68,68,0.55)',
                 borderRadius: 6,
                 borderSkipped: false,
             },
@@ -199,7 +189,7 @@ function RevenueTrendChart({
     };
 
     return (
-        <motion.div {...fadeUp(1)} className="bg-white rounded-2xl border border-slate-200/70 p-5 shadow-[0_1px_4px_rgba(0,0,0,0.06)]">
+        <motion.div {...fadeUp(1)} className="card">
             <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
                 <div>
                     <h3 className="font-semibold text-slate-800">Revenue Trend</h3>
@@ -226,7 +216,7 @@ function RevenueTrendChart({
                                 type="button"
                                 onClick={() => onPeriodChange(period.value)}
                                 className={`px-3 py-1.5 text-xs font-semibold rounded-[9px] transition-all duration-200 ${
-                                    trendPeriod === period.value ? 'bg-[#0F6E56] text-white shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                                    trendPeriod === period.value ? 'bg-primary text-white shadow-sm' : 'text-slate-500 hover:text-slate-700'
                                 }`}
                             >
                                 {period.label}
@@ -277,7 +267,7 @@ function RevenueTrendChart({
                             max={customTo || today}
                             value={customFrom}
                             onChange={(e) => onCustomChange('from', e.target.value)}
-                            className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg text-slate-700 bg-white focus:outline-none focus:border-[#0F6E56] focus:ring-2 focus:ring-[#0F6E56]/15 transition-all"
+                            className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg text-slate-700 bg-white focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/15 transition-all"
                         />
                     </div>
                     <div className="flex-1 min-w-[130px]">
@@ -288,7 +278,7 @@ function RevenueTrendChart({
                             max={today}
                             value={customTo}
                             onChange={(e) => onCustomChange('to', e.target.value)}
-                            className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg text-slate-700 bg-white focus:outline-none focus:border-[#0F6E56] focus:ring-2 focus:ring-[#0F6E56]/15 transition-all"
+                            className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg text-slate-700 bg-white focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/15 transition-all"
                         />
                     </div>
                     {(!customFrom || !customTo) && (
@@ -351,7 +341,7 @@ function RevenueTrendChart({
 }
 
 const SERVICE_CONFIG = [
-    { key: 'orthodontics', label: 'Orthodontics', color: '#0F6E56' },
+    { key: 'orthodontics', label: 'Orthodontics', color: '#0a6352' },
     { key: 'restorations', label: 'Restorations', color: '#3B82F6' },
     { key: 'extractions', label: 'Extractions', color: '#F59E0B' },
     { key: 'cleaning', label: 'Cleaning', color: '#8B5CF6' },
@@ -374,14 +364,14 @@ function ServiceBreakdown({ services, loading }) {
         : featuredServices;
 
     return (
-        <motion.div {...fadeUp(2)} className="bg-white rounded-2xl border border-slate-200/70 p-5 shadow-[0_1px_4px_rgba(0,0,0,0.06)]">
+        <motion.div {...fadeUp(2)} className="card">
             <div className="mb-4 flex items-start justify-between gap-3">
                 <div>
                     <h3 className="font-semibold text-slate-800">Revenue by Service</h3>
                     <p className="text-xs text-slate-400 mt-0.5">Top contributors this month</p>
                 </div>
                 {!loading ? (
-                    <span className="rounded-full bg-slate-100 px-3 py-1 text-[11px] font-semibold text-slate-600">
+                    <span className="badge-gray">
                         Total {peso(monthlyTotal)}
                     </span>
                 ) : null}
@@ -447,10 +437,10 @@ const DRILLDOWN_METRICS = [
 
 function SourceChip({ sourceType }) {
     const classes = {
-        visit: 'bg-blue-50 text-blue-700',
-        ortho_downpayment: 'bg-emerald-50 text-emerald-700',
-        ortho_adjustment: 'bg-teal-50 text-teal-700',
-        ortho_balance: 'bg-rose-50 text-rose-700',
+        visit: 'badge-blue',
+        ortho_downpayment: 'badge-green',
+        ortho_adjustment: 'badge-teal',
+        ortho_balance: 'badge-red',
     };
 
     const labels = {
@@ -461,7 +451,7 @@ function SourceChip({ sourceType }) {
     };
 
     return (
-        <span className={`inline-flex items-center rounded-full px-2 py-1 text-[11px] font-semibold ${classes[sourceType] || 'bg-slate-100 text-slate-600'}`}>
+        <span className={classes[sourceType] || 'badge-gray'}>
             {labels[sourceType] || sourceType}
         </span>
     );
@@ -487,7 +477,7 @@ function RevenueDrilldownPanel({
         : 'Select a daily bar to inspect the exact records behind that total.';
 
     return (
-        <motion.section {...fadeUp(2)} className="bg-white rounded-2xl border border-slate-200/70 p-5 shadow-[0_1px_4px_rgba(0,0,0,0.06)] space-y-4">
+        <motion.section {...fadeUp(2)} className="card space-y-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                     <h3 className="font-semibold text-slate-800">Revenue Drilldown</h3>
@@ -502,7 +492,7 @@ function RevenueDrilldownPanel({
                                 onClick={() => onMetricChange(option.value)}
                                 disabled={!bucket || loading}
                                 className={`px-3 py-1.5 text-xs font-semibold rounded-[9px] transition-all duration-200 ${
-                                    metric === option.value ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-500 hover:text-slate-700 disabled:text-slate-300'
+                                    metric === option.value ? 'bg-primary text-white shadow-sm' : 'text-slate-500 hover:text-slate-700 disabled:text-slate-300'
                                 }`}
                             >
                                 {option.label}
@@ -517,7 +507,7 @@ function RevenueDrilldownPanel({
                                 onClick={() => onSourceChange(option.value)}
                                 disabled={!bucket || loading}
                                 className={`px-3 py-1.5 text-xs font-semibold rounded-[9px] transition-all duration-200 ${
-                                    source === option.value ? 'bg-[#0F6E56] text-white shadow-sm' : 'text-slate-500 hover:text-slate-700 disabled:text-slate-300'
+                                    source === option.value ? 'bg-primary text-white shadow-sm' : 'text-slate-500 hover:text-slate-700 disabled:text-slate-300'
                                 }`}
                             >
                                 {option.label}
@@ -552,15 +542,15 @@ function RevenueDrilldownPanel({
             ) : (
                 <>
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                        <div className="rounded-2xl bg-white border border-slate-200 px-4 py-3">
+                        <div className="card-sm">
                             <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 mb-1">Selected Period</p>
                             <p className="text-sm font-semibold text-slate-700">{bucket.label}</p>
                         </div>
-                        <div className="rounded-2xl bg-white border border-slate-200 px-4 py-3">
+                        <div className="card-sm">
                             <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 mb-1">Total</p>
                             <p className="text-lg font-bold text-slate-800">{peso(data?.total)}</p>
                         </div>
-                        <div className="rounded-2xl bg-white border border-slate-200 px-4 py-3">
+                        <div className="card-sm">
                             <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 mb-1">Records</p>
                             <p className="text-lg font-bold text-slate-800">{data?.count ?? 0}</p>
                         </div>
@@ -569,7 +559,7 @@ function RevenueDrilldownPanel({
                     {data?.breakdown?.length ? (
                         <div className="flex flex-wrap gap-2">
                             {data.breakdown.map((item) => (
-                                <span key={item.sourceType} className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
+                                <span key={item.sourceType} className="badge-gray">
                                     {item.label}: {peso(item.total)}
                                 </span>
                             ))}
@@ -592,7 +582,7 @@ function RevenueDrilldownPanel({
                                     {data.rows.map((row) => (
                                         <tr key={`${row.sourceType}-${row.entryId}`} className="hover:bg-slate-50/80 transition-colors">
                                             <td className="px-4 py-3">
-                                                <Link to={`/patients/${row.patientId}`} className="font-medium text-slate-700 hover:text-[#0F6E56]">
+                                                <Link to={`/patients/${row.patientId}`} className="font-medium text-slate-700 hover:text-primary">
                                                     {row.patientName}
                                                 </Link>
                                                 {row.details ? <p className="text-[11px] text-slate-400 mt-0.5">{row.details}</p> : null}
@@ -625,17 +615,17 @@ function RevenueDrilldownPanel({
 function AmountBadge({ amount }) {
     const n = parseFloat(amount);
     if (n > 20_000) {
-        return <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-red-50 text-red-600 ring-1 ring-red-200/60">{peso(n)}</span>;
+        return <span className="badge-red font-bold">{peso(n)}</span>;
     }
     if (n >= 5_000) {
-        return <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-50 text-amber-600 ring-1 ring-amber-200/60">{peso(n)}</span>;
+        return <span className="badge-amber font-bold">{peso(n)}</span>;
     }
-    return <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-slate-100 text-slate-600">{peso(n)}</span>;
+    return <span className="badge-gray font-bold">{peso(n)}</span>;
 }
 
 function OutstandingMiniList({ patients, loading }) {
     return (
-        <motion.div {...fadeUp(3)} className="bg-white rounded-2xl border border-slate-200/70 shadow-[0_1px_4px_rgba(0,0,0,0.06)] overflow-hidden">
+        <motion.div {...fadeUp(3)} className="card overflow-hidden p-0">
             <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
                 <div className="flex items-center gap-2">
                     <div className="w-7 h-7 rounded-lg bg-red-50 flex items-center justify-center">
@@ -646,7 +636,7 @@ function OutstandingMiniList({ patients, loading }) {
                         <p className="text-[11px] text-slate-400">Top 5 patients by amount owed</p>
                     </div>
                 </div>
-                <Link to="/patients?outstanding=1" className="flex items-center gap-1 text-xs font-semibold text-[#0F6E56] hover:text-emerald-700 transition-colors">
+                <Link to="/patients?outstanding=1" className="flex items-center gap-1 text-xs font-semibold text-primary hover:text-primary-light transition-colors">
                     View all <ArrowRight className="w-3.5 h-3.5" />
                 </Link>
             </div>
@@ -825,14 +815,14 @@ export default function RevenueSection() {
             )}
 
             <div className="flex items-center gap-2">
-                <BarChart2 className="w-4 h-4 text-[#0F6E56]" />
+                <BarChart2 className="w-4 h-4 text-primary" />
                 <div>
                     <h2 className="text-sm font-bold text-slate-700 uppercase tracking-wider">Revenue Overview</h2>
                     <p className="text-xs text-slate-400">A simpler snapshot of collections, balances, and service mix.</p>
                 </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+            <div className={`grid grid-cols-1 sm:grid-cols-2 gap-4 ${showComparisonCard ? 'xl:grid-cols-4' : 'xl:grid-cols-3'}`}>
                 <MetricCard
                     index={0}
                     icon={Banknote}
@@ -857,7 +847,7 @@ export default function RevenueSection() {
                 />
                 )}
                 <MetricCard
-                    index={1}
+                    index={showComparisonCard ? 2 : 1}
                     icon={AlertCircle}
                     iconBg="bg-red-50"
                     iconColor="text-red-500"
@@ -868,7 +858,7 @@ export default function RevenueSection() {
                     loading={loading}
                 />
                 <MetricCard
-                    index={2}
+                    index={showComparisonCard ? 3 : 2}
                     icon={Percent}
                     iconBg={data?.collectionRate < 80 ? 'bg-red-50' : 'bg-teal-50'}
                     iconColor={data?.collectionRate < 80 ? 'text-red-500' : 'text-teal-600'}

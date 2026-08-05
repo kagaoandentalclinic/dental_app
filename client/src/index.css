@@ -87,17 +87,30 @@
   }
 
   /* Stat card — icon circle + number style */
-  .stat-card {
-    @apply card flex items-center gap-4 cursor-default;
-  }
-  .stat-icon {
-    @apply w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 text-xl;
-  }
-  .stat-value {
-    @apply text-2xl font-bold text-text-primary tabular-nums;
-  }
   .stat-label {
     @apply text-xs font-medium text-slate-500 uppercase tracking-wide;
+  }
+
+  /* Solid KPI box — big icon watermark, bold number, footer link (AdminLTE-style) */
+  .stat-box {
+    @apply relative flex flex-col overflow-hidden rounded-2xl text-white shadow-card
+           transition-all duration-200 hover:-translate-y-0.5 hover:shadow-card-hover;
+  }
+  .stat-box-icon {
+    @apply absolute -right-3 -bottom-3 opacity-20 pointer-events-none;
+  }
+  .stat-box-body {
+    @apply relative px-5 pt-5 pb-4;
+  }
+  .stat-box-value {
+    @apply text-3xl font-bold tabular-nums leading-tight;
+  }
+  .stat-box-label {
+    @apply mt-1 text-sm font-medium text-white/90;
+  }
+  .stat-box-footer {
+    @apply relative flex items-center justify-between px-5 py-2.5 text-xs font-semibold
+           bg-black/10 transition-colors duration-200 hover:bg-black/15;
   }
 
   /* ─────────────────────────────────────────

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
-    AlertCircle, Ban, Camera, CheckCircle, ChevronLeft, ChevronRight,
+    AlertCircle, Ban, Camera, Check, CheckCircle, ChevronLeft, ChevronRight,
     RefreshCw, Upload, X,
 } from 'lucide-react';
 import axios from 'axios';
@@ -340,16 +340,29 @@ export default function PatientIntake() {
                             </div>
 
                             <div className="card">
-                                <div className="flex flex-wrap gap-2">
+                                <div className="flex items-center">
                                     {STEPS.map((label, index) => (
-                                        <div
-                                            key={label}
-                                            className={`px-3 py-2 rounded-full text-sm font-medium ${index === step ? 'bg-primary text-white' : 'bg-surface text-text-secondary'}`}
-                                        >
-                                            {index + 1}. {label}
+                                        <div key={label} className="flex flex-1 items-center last:flex-none">
+                                            <div
+                                                className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold transition-colors duration-200 ${
+                                                    index < step
+                                                        ? 'bg-primary text-white'
+                                                        : index === step
+                                                        ? 'bg-primary text-white ring-4 ring-primary/15'
+                                                        : 'bg-surface text-text-secondary border border-border'
+                                                }`}
+                                            >
+                                                {index < step ? <Check className="w-4 h-4" /> : index + 1}
+                                            </div>
+                                            {index < STEPS.length - 1 && (
+                                                <div className={`mx-1.5 h-0.5 flex-1 rounded-full transition-colors duration-200 sm:mx-2 ${index < step ? 'bg-primary' : 'bg-border'}`} />
+                                            )}
                                         </div>
                                     ))}
                                 </div>
+                                <p className="mt-3 text-center text-sm font-semibold text-text-primary">
+                                    Step {step + 1} of {STEPS.length}: {STEPS[step]}
+                                </p>
                             </div>
 
                             {errors._global && (

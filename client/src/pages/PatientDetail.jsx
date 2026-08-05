@@ -153,8 +153,19 @@ export default function PatientDetail() {
                 </div>
             </div>
 
-            {/* Tabs */}
-            <div className="border-b border-border -mx-0">
+            {/* Tabs — dropdown on mobile, horizontal tab bar from sm up */}
+            <div className="sm:hidden">
+                <select
+                    className="form-select"
+                    value={activeTab}
+                    onChange={(e) => setTab(e.target.value)}
+                >
+                    {TABS.map(t => (
+                        <option key={t.id} value={t.id}>{t.label}</option>
+                    ))}
+                </select>
+            </div>
+            <div className="hidden border-b border-border sm:block">
                 <div className="flex overflow-x-auto pb-1">
                     {TABS.map(t => (
                         <button

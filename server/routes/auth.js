@@ -7,36 +7,19 @@ const { verifyToken } = require('../middleware/auth');
 const logger = require('../utils/logger');
 const { signAdminToken } = require('../utils/jwt');
 const { attachPermissions } = require('../utils/permissions');
+const { createLoginRateLimiter } = require('../middleware/loginRateLimit');
+const { isStrongPassword, PASSWORD_POLICY_MESSAGE } = require('../utils/passwordPolicy');
 
-// Rate limiting store (simple in-memory)
-const loginAttempts = new Map();
-const RATE_LIMIT = 5;
-const RATE_WINDOW = 60 * 1000; // 1 minute
-
-function checkRateLimit(ip) {
-    const now = Date.now();
-    const record = loginAttempts.get(ip);
-    if (!record || now - record.resetAt > RATE_WINDOW) {
-        loginAttempts.set(ip, { count: 1, resetAt: now });
-        return true;
-    }
-    if (record.count >= RATE_LIMIT) return false;
-    record.count++;
-    return true;
-}
+const loginRateLimit = createLoginRateLimiter();
 
 // POST /api/auth/login
 router.post('/login',
+    loginRateLimit,
     body('username').trim().notEmpty(),
     body('password').notEmpty(),
     async (req, res) => {
         const errors = validationResult(req);
         if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
-
-        const ip = req.ip;
-        if (!checkRateLimit(ip)) {
-            return res.status(429).json({ error: 'Too many login attempts. Please wait a minute.' });
-        }
 
         try {
             const { username, password } = req.body;
@@ -96,7 +79,7 @@ router.get('/me', verifyToken, async (req, res) => {
 // PUT /api/auth/change-password
 router.put('/change-password', verifyToken,
     body('currentPassword').notEmpty(),
-    body('newPassword').isLength({ min: 6 }),
+    body('newPassword').custom(isStrongPassword).withMessage(PASSWORD_POLICY_MESSAGE),
     async (req, res) => {
         const errors = validationResult(req);
         if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });

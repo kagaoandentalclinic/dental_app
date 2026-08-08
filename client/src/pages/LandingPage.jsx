@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { ChevronRight, Shield, Stethoscope } from 'lucide-react';
+import { ChevronRight, Stethoscope } from 'lucide-react';
 
 export default function LandingPage() {
     return (
@@ -15,10 +15,10 @@ export default function LandingPage() {
                         <p className="mt-2 text-sm text-text-secondary sm:mt-3 sm:text-lg">Your smile, our priority</p>
                     </div>
 
-                    <div className="mt-6 grid gap-3 sm:mt-10 sm:grid-cols-2 sm:gap-5">
+                    <div className="mt-6 flex justify-center sm:mt-10">
                         <Link
                             to="/portal"
-                            className="group rounded-[1.5rem] border border-emerald-200 bg-emerald-50 p-5 text-left shadow-sm transition-all hover:-translate-y-1 hover:shadow-xl sm:rounded-[1.75rem] sm:p-6"
+                            className="group w-full max-w-sm rounded-[1.5rem] border border-emerald-200 bg-emerald-50 p-5 text-left shadow-sm transition-all hover:-translate-y-1 hover:shadow-xl sm:rounded-[1.75rem] sm:p-6"
                         >
                             <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary text-white shadow-lg shadow-emerald-900/20 sm:h-14 sm:w-14">
                                 <Stethoscope className="w-6 h-6 sm:w-7 sm:h-7" />
@@ -29,23 +29,6 @@ export default function LandingPage() {
                             </p>
                             <div className="mt-4 inline-flex items-center gap-2 font-semibold text-primary sm:mt-6">
                                 Go to Patient Portal
-                                <ChevronRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
-                            </div>
-                        </Link>
-
-                        <Link
-                            to="/admin/login"
-                            className="group rounded-[1.5rem] border border-emerald-950/10 bg-white p-5 text-left shadow-sm transition-all hover:-translate-y-1 hover:shadow-xl sm:rounded-[1.75rem] sm:p-6"
-                        >
-                            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-950 text-white shadow-lg shadow-emerald-950/20 sm:h-14 sm:w-14">
-                                <Shield className="w-6 h-6 sm:w-7 sm:h-7" />
-                            </div>
-                            <h2 className="mt-4 text-xl font-bold text-text-primary sm:mt-6 sm:text-2xl">Staff / Admin</h2>
-                            <p className="mt-1.5 text-sm leading-6 text-text-secondary">
-                                Access the clinic dashboard, patient records, appointments, forms, and settings.
-                            </p>
-                            <div className="mt-4 inline-flex items-center gap-2 font-semibold text-primary sm:mt-6">
-                                Go to Admin Login
                                 <ChevronRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
                             </div>
                         </Link>

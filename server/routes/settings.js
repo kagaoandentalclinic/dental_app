@@ -6,6 +6,7 @@ const pool = require('../db/pool');
 const { verifyToken } = require('../middleware/auth');
 const { requirePermission } = require('../middleware/permissions');
 const { PERMISSIONS, getRolePermissions } = require('../utils/permissions');
+const { isStrongPassword, PASSWORD_POLICY_MESSAGE } = require('../utils/passwordPolicy');
 
 // All routes require authentication
 router.use(verifyToken);
@@ -277,7 +278,7 @@ router.post('/users', requirePermission(PERMISSIONS.MANAGE_STAFF),
     body('full_name').trim().notEmpty().withMessage('Full name is required'),
     body('username').trim().isLength({ min: 3 }).withMessage('Username must be at least 3 characters'),
     body('email').isEmail().normalizeEmail().withMessage('Valid email is required'),
-    body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
+    body('password').custom(isStrongPassword).withMessage(PASSWORD_POLICY_MESSAGE),
     body('role').isIn(['admin', 'dentist', 'hygienist', 'receptionist']).withMessage('Invalid role'),
     async (req, res) => {
         const errors = validationResult(req);
@@ -313,7 +314,7 @@ router.put('/users/:id', requirePermission(PERMISSIONS.MANAGE_STAFF),
     body('full_name').trim().notEmpty().withMessage('Full name is required'),
     body('email').isEmail().normalizeEmail().withMessage('Valid email is required'),
     body('role').isIn(['admin', 'dentist', 'hygienist', 'receptionist']).withMessage('Invalid role'),
-    body('password').optional({ checkFalsy: true }).isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
+    body('password').optional({ checkFalsy: true }).custom(isStrongPassword).withMessage(PASSWORD_POLICY_MESSAGE),
     async (req, res) => {
         const errors = validationResult(req);
         if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });

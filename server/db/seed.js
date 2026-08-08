@@ -15,26 +15,40 @@ async function seed() {
         console.log('✅ Schema applied.');
 
         // ─── Admin ──────────────────────────────────────
+        // ON CONFLICT DO NOTHING so re-running the seed never resets a password
+        // that's already been rotated away from the default.
         const adminHash = await bcrypt.hash('admin123', 10);
         const adminRes = await client.query(`
       INSERT INTO admins (username, email, password_hash, full_name, role)
       VALUES ($1, $2, $3, $4, $5)
-      ON CONFLICT (username) DO UPDATE SET password_hash = EXCLUDED.password_hash
+      ON CONFLICT (username) DO NOTHING
       RETURNING id
     `, ['admin', 'admin@dentalclinic.com', adminHash, 'Dr. Maria Santos', 'admin']);
-        const adminId = adminRes.rows[0].id;
-        console.log('✅ Admin seeded.');
+        let adminId;
+        if (adminRes.rows.length > 0) {
+            adminId = adminRes.rows[0].id;
+            console.log('✅ Admin seeded (default password admin123 — change it immediately).');
+        } else {
+            adminId = (await client.query('SELECT id FROM admins WHERE username = $1', ['admin'])).rows[0].id;
+            console.log('ℹ️  Admin already exists — password left unchanged.');
+        }
 
         // Second dentist
         const dentistHash = await bcrypt.hash('dentist123', 10);
         const dentistRes = await client.query(`
       INSERT INTO admins (username, email, password_hash, full_name, role)
       VALUES ($1, $2, $3, $4, $5)
-      ON CONFLICT (username) DO UPDATE SET password_hash = EXCLUDED.password_hash
+      ON CONFLICT (username) DO NOTHING
       RETURNING id
     `, ['drreyes', 'reyes@dentalclinic.com', dentistHash, 'Dr. Jose Reyes', 'dentist']);
-        const dentistId = dentistRes.rows[0].id;
-        console.log('✅ Second dentist seeded.');
+        let dentistId;
+        if (dentistRes.rows.length > 0) {
+            dentistId = dentistRes.rows[0].id;
+            console.log('✅ Second dentist seeded (default password dentist123 — change it immediately).');
+        } else {
+            dentistId = (await client.query('SELECT id FROM admins WHERE username = $1', ['drreyes'])).rows[0].id;
+            console.log('ℹ️  Dentist already exists — password left unchanged.');
+        }
 
         // ─── Patients ────────────────────────────────────
         const patients = [
@@ -238,9 +252,10 @@ async function seed() {
 
         console.log('\n🦷 Database seeded successfully!');
         console.log('──────────────────────────────────');
-        console.log('Default Admin Credentials:');
+        console.log('Default Admin Credentials (if freshly created above):');
         console.log('  Username: admin');
         console.log('  Password: admin123');
+        console.log('⚠️  Change this password immediately if this is a production database.');
         console.log('──────────────────────────────────');
     } catch (err) {
         console.error('❌ Seed failed:', err);

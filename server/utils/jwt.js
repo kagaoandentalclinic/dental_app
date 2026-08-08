@@ -17,7 +17,7 @@ function signAdminToken(payload) {
 }
 
 function verifyAdminToken(token) {
-    return jwt.verify(token, getJwtSecret());
+    return jwt.verify(token, getJwtSecret(), { algorithms: ['HS256'] });
 }
 
 function signPortalToken(payload) {
@@ -25,7 +25,7 @@ function signPortalToken(payload) {
 }
 
 function verifyPortalToken(token) {
-    const decoded = jwt.verify(token, getJwtSecret());
+    const decoded = jwt.verify(token, getJwtSecret(), { algorithms: ['HS256'] });
     if (decoded.token_type !== 'portal_patient') {
         throw new Error('Invalid portal token');
     }

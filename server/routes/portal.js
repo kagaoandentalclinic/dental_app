@@ -11,6 +11,10 @@ const logger = require('../utils/logger');
 const { sendPortalPasswordResetEmail, sendPortalVerificationEmail } = require('../utils/portalEmail');
 const { verifyGoogleIdToken } = require('../utils/googleAuth');
 const { buildClinicAppointmentDateTime } = require('../utils/appointmentDate');
+const { createLoginRateLimiter } = require('../middleware/loginRateLimit');
+const { isStrongPassword, PASSWORD_POLICY_MESSAGE } = require('../utils/passwordPolicy');
+
+const portalLoginRateLimit = createLoginRateLimiter();
 
 const VERIFICATION_WINDOW_HOURS = 48;
 const PASSWORD_RESET_WINDOW_HOURS = 2;
@@ -267,7 +271,7 @@ router.post('/register',
     body('last_name').trim().notEmpty(),
     body('email').isEmail(),
     body('phone').trim().notEmpty(),
-    body('password').isLength({ min: 6 }),
+    body('password').custom(isStrongPassword).withMessage(PASSWORD_POLICY_MESSAGE),
     body('confirm_password').custom((value, { req }) => value === req.body.password),
     async (req, res) => {
         const errors = validationResult(req);
@@ -541,7 +545,7 @@ router.post('/request-password-reset',
 
 router.post('/reset-password',
     body('token').trim().notEmpty(),
-    body('password').isLength({ min: 6 }),
+    body('password').custom(isStrongPassword).withMessage(PASSWORD_POLICY_MESSAGE),
     body('confirm_password').custom((value, { req }) => value === req.body.password),
     async (req, res) => {
         const errors = validationResult(req);
@@ -703,6 +707,7 @@ router.post('/google',
 );
 
 router.post('/login',
+    portalLoginRateLimit,
     body('email').isEmail(),
     body('password').notEmpty(),
     async (req, res) => {

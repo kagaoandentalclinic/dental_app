@@ -589,9 +589,11 @@ export default function VisitsTab({ patient }) {
                     <button className="btn-ghost text-xs" onClick={fetchVisits} disabled={loading}>
                         <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
                     </button>
-                    <button className="btn-primary text-sm flex-1 sm:flex-none" onClick={openAdd}>
-                        <Plus className="w-4 h-4" /> Add Visit
-                    </button>
+                    {(loading || visits.length > 0) && (
+                        <button className="btn-primary text-sm flex-1 sm:flex-none" onClick={openAdd}>
+                            <Plus className="w-4 h-4" /> Add Visit
+                        </button>
+                    )}
                 </div>
             </div>
 

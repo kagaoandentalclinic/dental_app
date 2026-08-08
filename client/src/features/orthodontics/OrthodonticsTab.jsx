@@ -539,9 +539,11 @@ export default function OrthodonticsTab({ patient }) {
                         <button className="btn-ghost text-xs" onClick={fetchData}>
                             <RefreshCw className="w-4 h-4" />
                         </button>
-                        <button className="btn-primary text-sm flex-1 sm:flex-none" onClick={() => setAdjModal('new')}>
-                            <Plus className="w-4 h-4" /> Add Adjustment
-                        </button>
+                        {adjustments.length > 0 && (
+                            <button className="btn-primary text-sm flex-1 sm:flex-none" onClick={() => setAdjModal('new')}>
+                                <Plus className="w-4 h-4" /> Add Adjustment
+                            </button>
+                        )}
                     </div>
                 </div>
 

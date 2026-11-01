@@ -1,17 +1,24 @@
 import { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
-import { Plus, Pencil, Trash2, Calendar, User, RefreshCw, Printer, Receipt, FileText, CheckCircle } from 'lucide-react';
+import { Plus, Pencil, Trash2, Calendar, User, RefreshCw, Printer, Receipt, FileText, CheckCircle, Smile, Wallet } from 'lucide-react';
 
 import client from '../../api/client';
 import { useToast } from '../../components/Toast';
 import { formatDate, formatCurrency, capitalize, toLocalDateInput } from '../../utils/helpers';
 
-import { VISIT_TYPES, PAYMENT_STATUSES, VISIT_TYPE_COLORS } from '../../utils/constants';
+import { VISIT_TYPES, PAYMENT_STATUSES, VISIT_TYPE_COLORS, RESTORATION_CLASSES } from '../../utils/constants';
 import Modal from '../../components/Modal';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import EmptyState from '../../components/EmptyState';
 import ConfirmDialog from '../../components/ConfirmDialog';
-import { printVisitReceipt, printPrescription } from '../../utils/print';
+import {
+    printVisitReceipt,
+    printPrescription,
+    printVisitPaymentReceipt,
+    printOrthoPaymentReceipt,
+    printAccountStatement,
+    getVisitPaymentTotals,
+} from '../../utils/print';
 
 function formatTeethTreated(value) {
     if (Array.isArray(value)) {
@@ -79,15 +86,7 @@ const TREATMENT_OPTION_GROUPS = [
     },
     {
         label: 'Tooth Restoration',
-        options: [
-            'Tooth Restoration - Class I',
-            'Tooth Restoration - Class II Mesial',
-            'Tooth Restoration - Class II Distal',
-            'Tooth Restoration - Class II MOD',
-            'Tooth Restoration - Class III',
-            'Tooth Restoration - Class IV',
-            'Tooth Restoration - Class V',
-        ],
+        options: RESTORATION_CLASSES.map((restorationClass) => `Tooth Restoration - ${restorationClass}`),
     },
 ];
 
@@ -113,27 +112,26 @@ function getInitialTreatmentState(value) {
 }
 
 function getVisitCollectedAmount(visit) {
-    const totalCost = parseFloat(visit.cost || 0);
-    if (visit.payment_status === 'partial') {
-        const partialPaid = parseFloat(visit.partial_amount_paid);
-        if (Number.isFinite(partialPaid)) return partialPaid;
-        return totalCost * 0.5;
-    }
-    if (visit.payment_status === 'paid' || visit.payment_status === 'insurance') {
-        return totalCost;
-    }
-    return 0;
+    const { totalCost, paid } = getVisitPaymentTotals(visit);
+    return visit.payment_status === 'insurance' ? totalCost : paid;
 }
 
 function getVisitOutstandingAmount(visit) {
-    const totalCost = parseFloat(visit.cost || 0);
-    if (visit.payment_status === 'partial') {
-        return Math.max(0, totalCost - getVisitCollectedAmount(visit));
+    return getVisitPaymentTotals(visit).balance;
+}
+
+function toAmount(value) {
+    const amount = Number.parseFloat(value);
+    return Number.isFinite(amount) ? amount : 0;
+}
+
+async function fetchClinic() {
+    try {
+        const res = await client.get('/settings/clinic');
+        return res.data;
+    } catch {
+        return null;
     }
-    if (visit.payment_status === 'pending') {
-        return totalCost;
-    }
-    return 0;
 }
 
 function formatMoneyPreview(value) {
@@ -238,7 +236,7 @@ function formatTreatmentPerformed(value) {
     return treatments.join(', ');
 }
 
-function VisitForm({ patientId, visit, onSave, onClose }) {
+function VisitForm({ patientId, visit, orthoCase, onSave, onClose }) {
     const toast = useToast();
     const [saving, setSaving] = useState(false);
     const initialTreatmentState = getInitialTreatmentState(visit?.treatment_performed);
@@ -255,8 +253,26 @@ function VisitForm({ patientId, visit, onSave, onClose }) {
         cost: visit?.cost || '',
         payment_status: visit?.payment_status || 'pending',
         partial_amount_paid: visit?.partial_amount_paid || '',
+        insurance: visit?.payment_status === 'insurance',
         notes: visit?.notes || '',
+        ortho_amount_paid: '',
+        ortho_payment_notes: '',
     });
+    const [recordInOrtho, setRecordInOrtho] = useState(true);
+    const isEdit = !!visit;
+    // A new Braces visit for a patient with an active ortho case is saved as an
+    // orthodontic adjustment, so its payment counts toward the ortho case balance.
+    const hasBraces = form.visit_types.includes('braces');
+    const orthoAvailable = !isEdit && hasBraces && orthoCase?.status === 'active';
+    const orthoMode = orthoAvailable && recordInOrtho;
+    const otherVisitTypes = form.visit_types.filter((type) => type !== 'braces');
+    const orthoRemaining = orthoCase
+        ? Math.max(0, toAmount(orthoCase.total_cost) - toAmount(orthoCase.total_paid))
+        : 0;
+    const orthoBalanceAfter = Math.max(0, orthoRemaining - toAmount(form.ortho_amount_paid));
+    // When editing, payments come from the visit's ledger (recorded via Add Payment).
+    const ledgerPaid = isEdit ? (visit.payments || []).reduce((sum, payment) => sum + toAmount(payment.amount), 0) : 0;
+    const editBalancePreview = Math.max(0, toAmount(form.cost) - ledgerPaid);
 
     const set = (field) => (e) => setForm(f => ({ ...f, [field]: e.target.value }));
     const setVisitTypes = (types) => setForm(f => ({ ...f, visit_types: types }));
@@ -273,16 +289,52 @@ function VisitForm({ patientId, visit, onSave, onClose }) {
         ...(form.treatment_performed.includes(TREATMENT_OTHER_OPTION) && customTreatment ? [customTreatment] : []),
     ];
 
+    const saveOrthoAdjustment = async () => {
+        if (otherVisitTypes.length > 0) {
+            toast.error('Orthodontic adjustments are saved on their own. Remove the other visit types and add them as a separate visit.');
+            return;
+        }
+        const amountPaid = toAmount(form.ortho_amount_paid);
+        if (amountPaid < 0) { toast.error('Amount paid must be a valid amount'); return; }
+        if (amountPaid > orthoRemaining + 0.001) {
+            toast.error(`Payment cannot exceed the orthodontic balance of ${formatCurrency(orthoRemaining)}`);
+            return;
+        }
+
+        setSaving(true);
+        try {
+            await client.post(`/patients/${patientId}/orthodontics/${orthoCase.id}/adjustments`, {
+                adjustment_date: form.visit_date,
+                next_adjustment_date: form.next_appointment,
+                notes: form.notes,
+                amount_paid: amountPaid,
+                payment_notes: form.ortho_payment_notes,
+                entry_type: 'adjustment',
+            });
+            toast.success('Orthodontic adjustment recorded');
+            onSave();
+        } catch (err) {
+            toast.error(err.response?.data?.error || 'Failed to record adjustment');
+        } finally {
+            setSaving(false);
+        }
+    };
+
     const handleSubmit = async (e) => {
         e.preventDefault();
         if (form.visit_types.length === 0) { toast.error('Please select at least one visit type'); return; }
+        if (orthoMode) { await saveOrthoAdjustment(); return; }
         if (form.treatment_performed.length === 0) { toast.error('Please select at least one treatment performed'); return; }
         if (form.treatment_performed.includes(TREATMENT_OTHER_OPTION) && !customTreatment) {
             toast.error('Please specify the custom treatment performed');
             return;
         }
         if (effectiveTreatments.length === 0) { toast.error('Treatment performed is required'); return; }
-        if (form.payment_status === 'partial') {
+        if (isEdit && !form.insurance && ledgerPaid > 0 && toAmount(form.cost) < ledgerPaid) {
+            toast.error(`Total cost cannot be less than the ${formatCurrency(ledgerPaid)} already paid`);
+            return;
+        }
+        if (!isEdit && form.payment_status === 'partial') {
             const cost = Number.parseFloat(form.cost);
             const partialAmount = Number.parseFloat(form.partial_amount_paid);
             if (!Number.isFinite(cost) || cost <= 0) {
@@ -313,6 +365,14 @@ function VisitForm({ patientId, visit, onSave, onClose }) {
             };
             delete payload.visit_types;
             delete payload.treatment_performed_other;
+            delete payload.insurance;
+            if (isEdit) {
+                // Status follows the payment ledger; only insurance coverage is set here.
+                payload.payment_status = form.insurance
+                    ? 'insurance'
+                    : (visit.payment_status === 'insurance' ? 'pending' : visit.payment_status);
+                delete payload.partial_amount_paid;
+            }
             if (visit) {
                 await client.put(`/patients/${patientId}/visits/${visit.id}`, payload);
                 toast.success('Visit updated successfully');
@@ -352,6 +412,68 @@ function VisitForm({ patientId, visit, onSave, onClose }) {
                     </p>
                 )}
             </div>
+            {orthoAvailable && (
+                <div className="rounded-xl border border-purple-200 bg-purple-50/60 px-3 py-3 space-y-3">
+                    <label className="flex items-start gap-2 text-sm text-text-primary">
+                        <input
+                            type="checkbox"
+                            className="mt-0.5"
+                            checked={recordInOrtho}
+                            onChange={(e) => setRecordInOrtho(e.target.checked)}
+                        />
+                        <span>
+                            <span className="font-semibold">Record as orthodontic adjustment</span>
+                            <span className="block text-xs text-text-secondary">
+                                Saved to the patient's orthodontic case. Payment counts toward the ortho balance
+                                ({formatCurrency(orthoRemaining)} remaining).
+                            </span>
+                        </span>
+                    </label>
+                    {orthoMode && otherVisitTypes.length > 0 && (
+                        <p className="text-xs text-amber-600">
+                            ⚠ Other visit types are selected. Remove them and add them as a separate visit.
+                        </p>
+                    )}
+                    {orthoMode && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div>
+                                <label className="form-label">Amount Paid (PHP)</label>
+                                <input
+                                    type="number"
+                                    min="0"
+                                    step="0.01"
+                                    inputMode="decimal"
+                                    className="form-input"
+                                    placeholder="0.00"
+                                    value={form.ortho_amount_paid}
+                                    onChange={set('ortho_amount_paid')}
+                                    onWheel={preventWheelChange}
+                                />
+                                <p className="text-xs text-text-secondary mt-1">
+                                    Paid {formatMoneyPreview(form.ortho_amount_paid)} / Balance {formatCurrency(orthoBalanceAfter)}
+                                </p>
+                            </div>
+                            <div>
+                                <label className="form-label">Payment Notes <span className="text-text-secondary font-normal">(optional)</span></label>
+                                <input
+                                    className="form-input"
+                                    placeholder="e.g. Cash, GCash, transfer"
+                                    value={form.ortho_payment_notes}
+                                    onChange={set('ortho_payment_notes')}
+                                />
+                            </div>
+                        </div>
+                    )}
+                </div>
+            )}
+            {!isEdit && hasBraces && !orthoAvailable && (
+                <p className="text-xs text-text-secondary">
+                    {orthoCase
+                        ? 'The orthodontic case is not active, so this will be saved as a regular visit.'
+                        : 'No orthodontic case on record. This will be saved as a regular visit. Start a case in the Orthodontics tab to track braces payments there.'}
+                </p>
+            )}
+            {!orthoMode && (<>
             <div>
                 <label className="form-label">Chief Complaint</label>
                 <input className="form-input" placeholder="Patient's main complaint..." value={form.chief_complaint} onChange={set('chief_complaint')} />
@@ -372,7 +494,7 @@ function VisitForm({ patientId, visit, onSave, onClose }) {
                 <TreatmentMultiPicker selected={form.treatment_performed} onChange={setTreatments} />
                 {form.treatment_performed.length === 0 && (
                     <p className="text-xs text-amber-500 mt-1.5 flex items-center gap-1">
-                        <span>âš </span> Select at least one treatment
+                        <span>⚠</span> Select at least one treatment
                     </p>
                 )}
                 {form.treatment_performed.includes(TREATMENT_OTHER_OPTION) && (
@@ -409,14 +531,39 @@ function VisitForm({ patientId, visit, onSave, onClose }) {
                         onWheel={preventWheelChange}
                     />
                 </div>
-                <div>
-                    <label className="form-label">Payment Status</label>
-                    <select className="form-select" value={form.payment_status} onChange={set('payment_status')}>
-                        {PAYMENT_STATUSES.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
-                    </select>
-                </div>
+                {isEdit ? (
+                    <div>
+                        <label className="form-label">Coverage</label>
+                        <label className="flex items-center gap-2 h-[42px] text-sm text-text-primary">
+                            <input
+                                type="checkbox"
+                                checked={form.insurance}
+                                onChange={(e) => setForm((f) => ({ ...f, insurance: e.target.checked }))}
+                            />
+                            Covered by Insurance / HMO
+                        </label>
+                    </div>
+                ) : (
+                    <div>
+                        <label className="form-label">Payment Status</label>
+                        <select className="form-select" value={form.payment_status} onChange={set('payment_status')}>
+                            {PAYMENT_STATUSES.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
+                        </select>
+                    </div>
+                )}
             </div>
-            {form.payment_status === 'partial' && (
+            {isEdit && !form.insurance && (
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
+                    <p className="text-text-primary">
+                        Paid <span className="font-semibold text-emerald-700">{formatCurrency(ledgerPaid)}</span>
+                        {' / '}Balance <span className="font-semibold text-amber-700">{formatCurrency(editBalancePreview)}</span>
+                    </p>
+                    <p className="text-xs text-text-secondary mt-0.5">
+                        Record payments with "Add Payment" on the visit card. Each payment keeps its own date and balance.
+                    </p>
+                </div>
+            )}
+            {!isEdit && form.payment_status === 'partial' && (
                 <div>
                     <label className="form-label">Partial Amount Paid (PHP)</label>
                     <input
@@ -449,65 +596,273 @@ function VisitForm({ patientId, visit, onSave, onClose }) {
                     </div>
                 </div>
             )}
+            </>)}
             <div>
-                <label className="form-label">Next Appointment</label>
+                <label className="form-label">{orthoMode ? 'Next Adjustment Date' : 'Next Appointment'}</label>
                 <input type="date" className="form-input" value={form.next_appointment} onChange={set('next_appointment')} />
             </div>
             <div>
-                <label className="form-label">Notes</label>
-                <textarea className="form-textarea" rows={2} placeholder="Additional notes..." value={form.notes} onChange={set('notes')} />
+                <label className="form-label">{orthoMode ? 'Clinical Notes' : 'Notes'}</label>
+                <textarea
+                    className="form-textarea"
+                    rows={2}
+                    placeholder={orthoMode ? 'Wire change, progress observations, patient concerns...' : 'Additional notes...'}
+                    value={form.notes}
+                    onChange={set('notes')}
+                />
             </div>
             <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-3 pt-2">
                 <button type="button" className="btn-secondary w-full sm:w-auto" onClick={onClose}>Cancel</button>
                 <button type="submit" className="btn-primary w-full sm:w-auto" disabled={saving}>
-                    {saving ? 'Saving...' : (visit ? 'Update Visit' : 'Add Visit')}
+                    {saving ? 'Saving...' : (visit ? 'Update Visit' : (orthoMode ? 'Record Adjustment' : 'Add Visit'))}
                 </button>
             </div>
         </form>
     );
 }
 
-function FinancialSummary({ visits }) {
-    const billed = visits.reduce((s, v) => s + parseFloat(v.cost || 0), 0);
-    const collected = visits.reduce((sum, visit) => sum + getVisitCollectedAmount(visit), 0);
-    const outstanding = visits.reduce((sum, visit) => sum + getVisitOutstandingAmount(visit), 0);
+function PaymentForm({ patientId, visit, payment, onSave, onClose }) {
+    const toast = useToast();
+    const [saving, setSaving] = useState(false);
+    const [form, setForm] = useState({
+        amount: payment?.amount ?? '',
+        payment_date: payment?.payment_date ? toLocalDateInput(payment.payment_date) : toLocalDateInput(new Date()),
+        notes: payment?.notes || '',
+    });
 
-    if (visits.length === 0) return null;
+    const totalCost = toAmount(visit.cost);
+    const paidByOthers = (visit.payments || [])
+        .filter((item) => item.id !== payment?.id)
+        .reduce((sum, item) => sum + toAmount(item.amount), 0);
+    const balanceBefore = Math.max(0, totalCost - paidByOthers);
+    const balanceAfter = Math.max(0, balanceBefore - toAmount(form.amount));
+    const set = (field) => (e) => setForm((f) => ({ ...f, [field]: e.target.value }));
+
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        const amount = toAmount(form.amount);
+        if (amount <= 0) { toast.error('Enter a payment amount greater than zero'); return; }
+        if (amount > balanceBefore + 0.001) { toast.error('Payment cannot exceed the remaining balance'); return; }
+
+        setSaving(true);
+        try {
+            const base = `/patients/${patientId}/visits/${visit.id}/payments`;
+            if (payment) {
+                await client.put(`${base}/${payment.id}`, form);
+                toast.success('Payment updated');
+            } else {
+                await client.post(base, form);
+                toast.success('Payment recorded');
+            }
+            onSave();
+        } catch (err) {
+            toast.error(err.response?.data?.error || 'Failed to save payment');
+        } finally {
+            setSaving(false);
+        }
+    };
+
     return (
-        <div className="grid grid-cols-3 gap-3">
-            <div className="card p-3 sm:p-4 text-center border-t-[3px] border-t-primary">
-                <p className="text-xs text-text-secondary uppercase tracking-wide font-medium">Total Billed</p>
-                <p className="text-lg font-bold text-text-primary mt-0.5">{formatCurrency(billed)}</p>
+        <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="bg-bg rounded-xl p-4 space-y-2 text-sm">
+                <div className="flex justify-between"><span className="text-text-secondary">Visit:</span><span className="font-semibold">{formatDate(visit.visit_date)}</span></div>
+                <div className="flex justify-between"><span className="text-text-secondary">Total Cost:</span><span className="font-semibold">{formatCurrency(totalCost)}</span></div>
+                <div className="flex justify-between"><span className="text-text-secondary">Paid (other payments):</span><span className="font-semibold text-green-600">{formatCurrency(paidByOthers)}</span></div>
+                <div className="flex justify-between"><span className="text-text-secondary">Balance before this payment:</span><span className="font-semibold">{formatCurrency(balanceBefore)}</span></div>
             </div>
-            <div className="card p-3 sm:p-4 text-center border-t-[3px] border-t-green-500">
-                <p className="text-xs text-text-secondary uppercase tracking-wide font-medium">Collected</p>
-                <p className="text-lg font-bold text-green-700 mt-0.5">{formatCurrency(collected)}</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                    <label className="form-label">Payment Date</label>
+                    <input type="date" className="form-input" value={form.payment_date} onChange={set('payment_date')} />
+                </div>
+                <div>
+                    <label className="form-label">Amount Paid (PHP)</label>
+                    <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        inputMode="decimal"
+                        className="form-input"
+                        placeholder="0.00"
+                        value={form.amount}
+                        onChange={set('amount')}
+                        onWheel={(e) => e.currentTarget.blur()}
+                        autoFocus
+                    />
+                </div>
             </div>
-            <div className={`card p-3 sm:p-4 text-center border-t-[3px] ${outstanding > 0 ? 'border-t-red-500' : 'border-t-gray-300'}`}>
-                <p className="text-xs text-text-secondary uppercase tracking-wide font-medium">Outstanding</p>
-                <p className={`text-lg font-bold mt-0.5 ${outstanding > 0 ? 'text-red-600' : 'text-text-secondary'}`}>
-                    {formatCurrency(Math.max(0, outstanding))}
+            <p className="text-sm text-text-primary">
+                After this payment: Paid <span className="font-semibold text-emerald-700">{formatMoneyPreview(form.amount)}</span>
+                {' / '}Balance <span className="font-semibold text-amber-700">{formatCurrency(balanceAfter)}</span>
+            </p>
+            <div>
+                <label className="form-label">Notes <span className="text-text-secondary font-normal">(optional)</span></label>
+                <input className="form-input" placeholder="e.g. Cash, GCash, transfer" value={form.notes} onChange={set('notes')} />
+            </div>
+            <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-3 pt-2">
+                <button type="button" className="btn-secondary w-full sm:w-auto" onClick={onClose}>Cancel</button>
+                <button type="submit" className="btn-primary w-full sm:w-auto" disabled={saving}>
+                    {saving ? 'Saving...' : (payment ? 'Update Payment' : 'Record Payment')}
+                </button>
+            </div>
+        </form>
+    );
+}
+
+function FinancialSummary({ visits, orthoCase }) {
+    const orthoTotal = toAmount(orthoCase?.total_cost);
+    const orthoPaid = toAmount(orthoCase?.total_paid);
+    const orthoOutstanding = orthoCase?.status === 'active' ? Math.max(0, orthoTotal - orthoPaid) : 0;
+    const billed = visits.reduce((s, v) => s + toAmount(v.cost), 0) + orthoTotal;
+    const collected = visits.reduce((sum, visit) => sum + getVisitCollectedAmount(visit), 0) + orthoPaid;
+    const outstanding = visits.reduce((sum, visit) => sum + getVisitOutstandingAmount(visit), 0) + orthoOutstanding;
+
+    if (visits.length === 0 && !orthoCase) return null;
+    return (
+        <div className="space-y-2">
+            <div className="grid grid-cols-3 gap-3">
+                <div className="card p-3 sm:p-4 text-center border-t-[3px] border-t-primary">
+                    <p className="text-xs text-text-secondary uppercase tracking-wide font-medium">Total Billed</p>
+                    <p className="text-lg font-bold text-text-primary mt-0.5">{formatCurrency(billed)}</p>
+                </div>
+                <div className="card p-3 sm:p-4 text-center border-t-[3px] border-t-green-500">
+                    <p className="text-xs text-text-secondary uppercase tracking-wide font-medium">Collected</p>
+                    <p className="text-lg font-bold text-green-700 mt-0.5">{formatCurrency(collected)}</p>
+                </div>
+                <div className={`card p-3 sm:p-4 text-center border-t-[3px] ${outstanding > 0 ? 'border-t-red-500' : 'border-t-gray-300'}`}>
+                    <p className="text-xs text-text-secondary uppercase tracking-wide font-medium">Outstanding</p>
+                    <p className={`text-lg font-bold mt-0.5 ${outstanding > 0 ? 'text-red-600' : 'text-text-secondary'}`}>
+                        {formatCurrency(Math.max(0, outstanding))}
+                    </p>
+                </div>
+            </div>
+            {orthoCase && (
+                <p className="text-xs text-text-secondary">
+                    Includes orthodontic treatment: Paid {formatCurrency(orthoPaid)} / Balance {formatCurrency(Math.max(0, orthoTotal - orthoPaid))}
                 </p>
-            </div>
+            )}
         </div>
+    );
+}
+
+function PaymentLedger({ visit, onPrint, onEdit, onDelete }) {
+    if (!visit.payments || visit.payments.length === 0) return null;
+    return (
+        <div className="mt-3 rounded-xl border border-slate-200 divide-y divide-slate-100">
+            {visit.payments.map((payment, index) => {
+                const balance = toAmount(payment.balance_after);
+                return (
+                    <div key={payment.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 sm:gap-3 px-3 py-2 text-xs">
+                        <div className="flex flex-wrap items-center gap-2 min-w-0">
+                            <span className="text-text-secondary">#{index + 1}</span>
+                            <span className="font-medium text-text-primary">{formatDate(payment.payment_date)}</span>
+                            {payment.notes && <span className="text-text-secondary italic truncate">{payment.notes}</span>}
+                        </div>
+                        <div className="flex items-center justify-between sm:justify-end gap-2">
+                            <span className="text-text-primary">
+                                Paid <span className="font-semibold text-emerald-700">{formatCurrency(payment.amount)}</span>
+                                {payment.balance_after != null && (
+                                    <>
+                                        {' / '}Balance{' '}
+                                        <span className={`font-semibold ${balance > 0 ? 'text-amber-700' : 'text-emerald-700'}`}>
+                                            {formatCurrency(balance)}
+                                        </span>
+                                    </>
+                                )}
+                            </span>
+                            <div className="flex items-center">
+                                <button className="btn-icon" title="Print payment receipt" onClick={() => onPrint(payment)}>
+                                    <Receipt className="w-3.5 h-3.5" />
+                                </button>
+                                <button className="btn-icon" title="Edit payment" onClick={() => onEdit(payment)}>
+                                    <Pencil className="w-3.5 h-3.5" />
+                                </button>
+                                <button className="btn-icon text-red-500 hover:text-red-600" title="Delete payment" onClick={() => onDelete(payment)}>
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                );
+            })}
+        </div>
+    );
+}
+
+function OrthoVisitCard({ entry, index, onPrintReceipt }) {
+    const paid = toAmount(entry.amount_paid);
+    const balance = toAmount(entry.balance_after);
+    return (
+        <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: index * 0.04 }}
+            className="card border-l-4 border-l-purple-400"
+        >
+            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                <div className="flex-1 min-w-0">
+                    <div className="flex flex-wrap items-center gap-2 mb-2">
+                        <span className="badge text-xs badge-purple">Ortho Adjustment</span>
+                        {paid > 0 && (
+                            <span className="text-xs font-medium text-orange-600">
+                                Paid {formatCurrency(paid)} | Balance {formatCurrency(balance)}
+                            </span>
+                        )}
+                    </div>
+                    <p className="text-sm font-medium text-text-primary mb-1">{entry.notes || 'Orthodontic adjustment'}</p>
+                    {entry.payment_notes && <p className="text-xs text-text-secondary italic">{entry.payment_notes}</p>}
+                    <div className="flex flex-wrap items-center gap-3 mt-2 text-xs text-text-secondary">
+                        <span className="flex items-center gap-1">
+                            <Calendar className="w-3.5 h-3.5" /> {formatDate(entry.adjustment_date)}
+                        </span>
+                        {entry.performed_by_name && (
+                            <span className="flex items-center gap-1">
+                                <User className="w-3.5 h-3.5" /> {entry.performed_by_name}
+                            </span>
+                        )}
+                        {entry.next_adjustment_date && (
+                            <span className="text-primary font-medium">
+                                Next: {formatDate(entry.next_adjustment_date)}
+                            </span>
+                        )}
+                        <span className="flex items-center gap-1">
+                            <Smile className="w-3.5 h-3.5" /> Managed in the Orthodontics tab
+                        </span>
+                    </div>
+                </div>
+                {paid > 0 && (
+                    <div className="flex items-center justify-end gap-1 shrink-0">
+                        <button className="btn-icon" title="Print payment receipt" onClick={() => onPrintReceipt(entry)}>
+                            <Receipt className="w-4 h-4" />
+                        </button>
+                    </div>
+                )}
+            </div>
+        </motion.div>
     );
 }
 
 export default function VisitsTab({ patient }) {
     const toast = useToast();
     const [visits, setVisits] = useState([]);
+    const [orthoEntries, setOrthoEntries] = useState([]);
+    const [orthoCase, setOrthoCase] = useState(null);
     const [loading, setLoading] = useState(true);
     const [modalOpen, setModalOpen] = useState(false);
     const [editVisit, setEditVisit] = useState(null);
     const [deleteVisit, setDeleteVisit] = useState(null);
     const [printMenu, setPrintMenu] = useState(null);
     const [markingPaid, setMarkingPaid] = useState(null);
+    const [paymentModal, setPaymentModal] = useState(null); // { visit, payment }
+    const [deletePayment, setDeletePayment] = useState(null); // { visit, payment }
 
     const fetchVisits = useCallback(async () => {
         setLoading(true);
         try {
             const res = await client.get(`/patients/${patient.id}/visits`);
             setVisits(res.data.visits);
+            setOrthoEntries(res.data.ortho_entries || []);
+            setOrthoCase(res.data.ortho_case || null);
         } catch {
             toast.error('Failed to load visits');
         } finally {
@@ -516,6 +871,14 @@ export default function VisitsTab({ patient }) {
     }, [patient.id]);
 
     useEffect(() => { fetchVisits(); }, [fetchVisits]);
+
+    // Regular visits and orthodontic adjustment visits, newest first.
+    const timeline = [
+        ...visits.map((visit) => ({ kind: 'visit', id: visit.id, date: visit.visit_date, data: visit })),
+        ...orthoEntries
+            .filter((entry) => entry.entry_type !== 'payment')
+            .map((entry) => ({ kind: 'ortho', id: entry.id, date: entry.adjustment_date, data: entry })),
+    ].sort((a, b) => new Date(b.date) - new Date(a.date));
 
     const handleSaved = () => {
         setModalOpen(false);
@@ -535,6 +898,19 @@ export default function VisitsTab({ patient }) {
         }
     };
 
+    const handleDeletePayment = async () => {
+        const { visit, payment } = deletePayment;
+        try {
+            await client.delete(`/patients/${patient.id}/visits/${visit.id}/payments/${payment.id}`);
+            toast.success('Payment deleted');
+            fetchVisits();
+        } catch (err) {
+            toast.error(err.response?.data?.error || 'Failed to delete payment');
+        } finally {
+            setDeletePayment(null);
+        }
+    };
+
     const openAdd = () => { setEditVisit(null); setModalOpen(true); };
     const openEdit = (v) => { setEditVisit(v); setModalOpen(true); };
     const closeModal = () => { setModalOpen(false); setEditVisit(null); };
@@ -542,26 +918,15 @@ export default function VisitsTab({ patient }) {
     const handleMarkPaid = async (v) => {
         setMarkingPaid(v.id);
         try {
-            await client.put(`/patients/${patient.id}/visits/${v.id}`, {
-                ...v,
-                payment_status: 'paid',
-                partial_amount_paid: v.cost || '',
+            await client.post(`/patients/${patient.id}/visits/${v.id}/payments/settle`, {
+                payment_date: toLocalDateInput(new Date()),
             });
             toast.success('Marked as paid');
             fetchVisits();
-        } catch {
-            toast.error('Failed to update payment status');
+        } catch (err) {
+            toast.error(err.response?.data?.error || 'Failed to update payment status');
         } finally {
             setMarkingPaid(null);
-        }
-    };
-
-    const fetchClinic = async () => {
-        try {
-            const res = await client.get('/settings/clinic');
-            return res.data;
-        } catch {
-            return null;
         }
     };
 
@@ -578,18 +943,47 @@ export default function VisitsTab({ patient }) {
         printPrescription(v, patient, clinic);
     };
 
+    const handlePrintPaymentReceipt = async (visit, payment) => {
+        const clinic = await fetchClinic();
+        printVisitPaymentReceipt(visit, payment, patient, clinic);
+    };
+
+    const handlePrintOrthoReceipt = async (entry) => {
+        if (!orthoCase) return;
+        const clinic = await fetchClinic();
+        printOrthoPaymentReceipt(orthoCase, {
+            id: entry.id,
+            date: entry.adjustment_date,
+            amount: entry.amount_paid,
+            balance_after: entry.balance_after,
+            notes: entry.payment_notes,
+            received_by: entry.performed_by_name,
+            label: `Adjustment visit – ${formatDate(entry.adjustment_date)}`,
+        }, patient, clinic);
+    };
+
+    const handlePrintStatement = async () => {
+        const clinic = await fetchClinic();
+        printAccountStatement(patient, { visits, orthoCase, orthoEntries }, clinic);
+    };
+
     return (
         <div className="space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <div>
                     <h2 className="font-semibold text-text-primary">Visit History</h2>
-                    <p className="text-xs text-text-secondary">{visits.length} visit{visits.length !== 1 ? 's' : ''} recorded</p>
+                    <p className="text-xs text-text-secondary">{timeline.length} visit{timeline.length !== 1 ? 's' : ''} recorded</p>
                 </div>
                 <div className="flex gap-2 w-full sm:w-auto">
                     <button className="btn-ghost text-xs" onClick={fetchVisits} disabled={loading}>
                         <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
                     </button>
-                    {(loading || visits.length > 0) && (
+                    {!loading && (visits.length > 0 || orthoCase) && (
+                        <button className="btn-secondary text-sm" onClick={handlePrintStatement} title="Print statement of account">
+                            <Printer className="w-4 h-4" /> Statement
+                        </button>
+                    )}
+                    {(loading || timeline.length > 0) && (
                         <button className="btn-primary text-sm flex-1 sm:flex-none" onClick={openAdd}>
                             <Plus className="w-4 h-4" /> Add Visit
                         </button>
@@ -597,11 +991,11 @@ export default function VisitsTab({ patient }) {
                 </div>
             </div>
 
-            {!loading && <FinancialSummary visits={visits} />}
+            {!loading && <FinancialSummary visits={visits} orthoCase={orthoCase} />}
 
             {loading ? (
                 <div className="flex justify-center py-12"><LoadingSpinner size="lg" /></div>
-            ) : visits.length === 0 ? (
+            ) : timeline.length === 0 ? (
                 <EmptyState
                     icon={Calendar}
                     title="No visits recorded"
@@ -614,10 +1008,21 @@ export default function VisitsTab({ patient }) {
                 />
             ) : (
                 <div className="space-y-3">
-                    {visits.map((v, i) => {
+                    {timeline.map((item, i) => {
+                        if (item.kind === 'ortho') {
+                            return (
+                                <OrthoVisitCard
+                                    key={`ortho-${item.id}`}
+                                    entry={item.data}
+                                    index={i}
+                                    onPrintReceipt={handlePrintOrthoReceipt}
+                                />
+                            );
+                        }
+                        const v = item.data;
                         const payment = PAYMENT_STATUSES.find(p => p.value === v.payment_status);
-                        const partialCollected = getVisitCollectedAmount(v);
-                        const partialOutstanding = getVisitOutstandingAmount(v);
+                        const { paid: visitPaid, balance: visitBalance } = getVisitPaymentTotals(v);
+                        const canTakePayment = (v.payment_status === 'pending' || v.payment_status === 'partial') && toAmount(v.cost) > 0;
                         return (
                             <motion.div
                                 key={v.id}
@@ -636,12 +1041,12 @@ export default function VisitsTab({ patient }) {
                                             ))}
                                             {payment && <span className={`badge text-xs ${payment.class}`}>{payment.label}</span>}
                                             {v.cost && <span className="text-xs font-medium text-text-secondary">{formatCurrency(v.cost)}</span>}
-                                            {v.payment_status === 'partial' && (
+                                            {v.payment_status !== 'insurance' && visitPaid > 0 && visitBalance > 0 && (
                                                 <span className="text-xs font-medium text-orange-600">
-                                                    Paid {formatCurrency(partialCollected)} | Balance {formatCurrency(partialOutstanding)}
+                                                    Paid {formatCurrency(visitPaid)} | Balance {formatCurrency(visitBalance)}
                                                 </span>
-                                        )}
-                                    </div>
+                                            )}
+                                        </div>
                                         <p className="text-sm font-medium text-text-primary mb-1">{formatTreatmentPerformed(v.treatment_performed)}</p>
                                         {v.chief_complaint && <p className="text-xs text-text-secondary">Complaint: {v.chief_complaint}</p>}
                                         {v.diagnosis && <p className="text-xs text-text-secondary">Diagnosis: {v.diagnosis}</p>}
@@ -662,11 +1067,20 @@ export default function VisitsTab({ patient }) {
                                         </div>
                                     </div>
                                     <div className="flex items-center justify-end gap-1 shrink-0">
+                                        {canTakePayment && (
+                                            <button
+                                                className="btn-icon text-primary"
+                                                title="Add Payment"
+                                                onClick={() => setPaymentModal({ visit: v, payment: null })}
+                                            >
+                                                <Wallet className="w-4 h-4" />
+                                            </button>
+                                        )}
                                         {/* Quick mark as paid */}
                                         {(v.payment_status === 'pending' || v.payment_status === 'partial') && (
                                             <button
                                                 className="btn-icon text-green-600 hover:bg-green-50"
-                                                title="Mark as Paid"
+                                                title="Mark as Paid (records the remaining balance)"
                                                 disabled={markingPaid === v.id}
                                                 onClick={() => handleMarkPaid(v)}
                                             >
@@ -713,6 +1127,12 @@ export default function VisitsTab({ patient }) {
                                         </button>
                                     </div>
                                 </div>
+                                <PaymentLedger
+                                    visit={v}
+                                    onPrint={(p) => handlePrintPaymentReceipt(v, p)}
+                                    onEdit={(p) => setPaymentModal({ visit: v, payment: p })}
+                                    onDelete={(p) => setDeletePayment({ visit: v, payment: p })}
+                                />
                             </motion.div>
                         );
                     })}
@@ -720,7 +1140,24 @@ export default function VisitsTab({ patient }) {
             )}
 
             <Modal isOpen={modalOpen} onClose={closeModal} title={editVisit ? 'Edit Visit' : 'Add Visit'} size="lg">
-                <VisitForm patientId={patient.id} visit={editVisit} onSave={handleSaved} onClose={closeModal} />
+                <VisitForm patientId={patient.id} visit={editVisit} orthoCase={orthoCase} onSave={handleSaved} onClose={closeModal} />
+            </Modal>
+
+            <Modal
+                isOpen={!!paymentModal}
+                onClose={() => setPaymentModal(null)}
+                title={paymentModal?.payment ? 'Edit Payment' : 'Add Payment'}
+                size="sm"
+            >
+                {paymentModal && (
+                    <PaymentForm
+                        patientId={patient.id}
+                        visit={paymentModal.visit}
+                        payment={paymentModal.payment}
+                        onSave={() => { setPaymentModal(null); fetchVisits(); }}
+                        onClose={() => setPaymentModal(null)}
+                    />
+                )}
             </Modal>
 
             <ConfirmDialog
@@ -730,6 +1167,15 @@ export default function VisitsTab({ patient }) {
                 confirmLabel="Delete"
                 onConfirm={handleDelete}
                 onCancel={() => setDeleteVisit(null)}
+            />
+
+            <ConfirmDialog
+                isOpen={!!deletePayment}
+                title="Delete Payment"
+                message={`Delete the ${formatCurrency(deletePayment?.payment?.amount)} payment from ${formatDate(deletePayment?.payment?.payment_date)}? The visit balance will be recalculated.`}
+                confirmLabel="Delete"
+                onConfirm={handleDeletePayment}
+                onCancel={() => setDeletePayment(null)}
             />
         </div>
     );

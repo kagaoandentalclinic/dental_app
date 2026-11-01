@@ -4,6 +4,7 @@ const router = express.Router();
 const pool = require('../db/pool');
 const { verifyToken } = require('../middleware/auth');
 const { getDentalIssueSql } = require('../utils/dentalChart');
+const { lastVisitSql } = require('../utils/visitLedger');
 const { logAudit } = require('../utils/auditLogs');
 const { publicFormLimiter, checkHoneypot, checkTiming, checkDuplicateCooldown, checkDeviceId } = require('../middleware/antiSpam');
 const {
@@ -164,9 +165,7 @@ router.get('/', verifyToken, async (req, res) => {
                   SELECT COUNT(*) FROM dental_chart dc
                   WHERE dc.patient_id = p.id AND ${getDentalIssueSql('dc')}
                 ) AS dental_issues,
-                (
-                  SELECT MAX(v.visit_date) FROM visits v WHERE v.patient_id = p.id
-                ) AS last_visit
+                ${lastVisitSql('p')} AS last_visit
              FROM patients p
              LEFT JOIN patient_contacts pc ON pc.patient_id = p.id
              WHERE ${whereSql}

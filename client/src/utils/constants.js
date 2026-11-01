@@ -33,6 +33,22 @@ export const TOOTH_NAMES = {
 
 export const TOOTH_SURFACES = ['Mesial', 'Distal', 'Occlusal', 'Buccal', 'Lingual'];
 
+// G.V. Black restoration / cavity classes (used by visit treatments and the dental chart)
+export const RESTORATION_CLASSES = [
+    'Class I',
+    'Class II Mesial',
+    'Class II Distal',
+    'Class II MOD',
+    'Class III',
+    'Class III Mesial',
+    'Class III Distal',
+    'Class IV',
+    'Class V',
+];
+
+// Tooth statuses that can carry a restoration / cavity class
+export const RESTORATION_CLASS_STATUSES = ['cavity', 'filled'];
+
 export const VISIT_TYPES = [
     { value: 'checkup', label: 'Checkup', color: 'blue' },
     { value: 'cleaning', label: 'Cleaning', color: 'teal' },

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
-import { Plus, Pencil, Trash2, RefreshCw, DollarSign, Calendar, Smile, Receipt } from 'lucide-react';
+import { Plus, Pencil, Trash2, RefreshCw, DollarSign, Calendar, Smile, Receipt, Printer } from 'lucide-react';
 import client from '../../api/client';
 import { useToast } from '../../components/Toast';
 import { formatDate, formatCurrency, toLocalDateInput } from '../../utils/helpers';
@@ -9,6 +9,7 @@ import Modal from '../../components/Modal';
 import ConfirmDialog from '../../components/ConfirmDialog';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import EmptyState from '../../components/EmptyState';
+import { printOrthoPaymentReceipt } from '../../utils/print';
 
 // ── Case Modal ────────────────────────────────────────────────────────────────
 function CaseModal({ patientId, orthoCase, onSave, onClose }) {
@@ -135,6 +136,7 @@ function PaymentModal({ patientId, orthoCase, onSave, onClose }) {
                 amount_paid: normalizedAmount,
                 payment_notes: paymentNotes.trim(),
                 notes: 'Payment entry',
+                entry_type: 'payment',
             });
             toast.success('Payment recorded!');
             onSave();
@@ -332,6 +334,34 @@ export default function OrthodonticsTab({ patient }) {
         }
     };
 
+    const handlePrintReceipt = async (entry) => {
+        let clinic = null;
+        try {
+            clinic = (await client.get('/settings/clinic')).data;
+        } catch {
+            // Print without clinic details.
+        }
+        printOrthoPaymentReceipt(orthoCase, entry, patient, clinic);
+    };
+
+    const printDownpaymentReceipt = () => handlePrintReceipt({
+        id: orthoCase.id,
+        date: orthoCase.start_date || orthoCase.created_at,
+        amount: orthoCase.downpayment,
+        balance_after: Math.max(0, (parseFloat(orthoCase.total_cost) || 0) - (parseFloat(orthoCase.downpayment) || 0)),
+        label: 'Downpayment',
+    });
+
+    const printEntryReceipt = (adj) => handlePrintReceipt({
+        id: adj.id,
+        date: adj.adjustment_date,
+        amount: adj.amount_paid,
+        balance_after: adj.balance_after,
+        notes: adj.payment_notes,
+        received_by: adj.performed_by_name,
+        label: adj.entry_type === 'payment' ? 'Payment' : `Adjustment visit – ${formatDate(adj.adjustment_date)}`,
+    });
+
     const statusObj = ORTHO_STATUSES.find(s => s.value === orthoCase?.status);
     const bracketObj = BRACKET_TYPES.find(b => b.value === orthoCase?.bracket_type);
     const totalCost = parseFloat(orthoCase?.total_cost) || 0;
@@ -452,7 +482,8 @@ export default function OrthodonticsTab({ patient }) {
                                     <th className="text-left text-xs text-text-secondary font-medium pb-2 pr-4">Date</th>
                                     <th className="text-right text-xs text-text-secondary font-medium pb-2 pr-4">Paid</th>
                                     <th className="text-right text-xs text-text-secondary font-medium pb-2 pr-4">Running Total</th>
-                                    <th className="text-right text-xs text-text-secondary font-medium pb-2">Balance</th>
+                                    <th className="text-right text-xs text-text-secondary font-medium pb-2 pr-4">Balance</th>
+                                    <th className="pb-2" />
                                 </tr>
                             </thead>
                             <tbody>
@@ -472,8 +503,13 @@ export default function OrthodonticsTab({ patient }) {
                                         <td className="py-2 pr-4 text-right text-text-primary">
                                             {formatCurrency(orthoCase.downpayment)}
                                         </td>
-                                        <td className="py-2 text-right text-text-primary">
+                                        <td className="py-2 pr-4 text-right text-text-primary">
                                             {formatCurrency(Math.max(0, totalCost - parseFloat(orthoCase.downpayment)))}
+                                        </td>
+                                        <td className="py-2 text-right">
+                                            <button className="btn-icon" title="Print receipt" onClick={printDownpaymentReceipt}>
+                                                <Printer className="w-3.5 h-3.5" />
+                                            </button>
                                         </td>
                                     </tr>
                                 )}
@@ -483,7 +519,7 @@ export default function OrthodonticsTab({ patient }) {
                                     const prevTotal = acc.runningTotal;
                                     const paid = parseFloat(adj.amount_paid) || 0;
                                     acc.runningTotal += paid;
-                                    const balance = Math.max(0, totalCost - acc.runningTotal - parseFloat(orthoCase.downpayment || 0));
+                                    const balance = parseFloat(adj.balance_after) || 0;
                                     acc.rows.push(
                                         <tr key={adj.id} className="border-b border-border/50 last:border-0">
                                             <td className="py-2 pr-4 text-text-secondary">{i + 1}</td>
@@ -505,8 +541,15 @@ export default function OrthodonticsTab({ patient }) {
                                             <td className="py-2 pr-4 text-right font-medium text-text-primary">
                                                 {formatCurrency(acc.runningTotal + parseFloat(orthoCase.downpayment || 0))}
                                             </td>
-                                            <td className={`py-2 text-right font-semibold ${balance === 0 ? 'text-green-600' : 'text-red-500'}`}>
+                                            <td className={`py-2 pr-4 text-right font-semibold ${balance === 0 ? 'text-green-600' : 'text-red-500'}`}>
                                                 {formatCurrency(balance)}
+                                            </td>
+                                            <td className="py-2 text-right">
+                                                {paid > 0 && (
+                                                    <button className="btn-icon" title="Print receipt" onClick={() => printEntryReceipt(adj)}>
+                                                        <Printer className="w-3.5 h-3.5" />
+                                                    </button>
+                                                )}
                                             </td>
                                         </tr>
                                     );
@@ -521,6 +564,7 @@ export default function OrthodonticsTab({ patient }) {
                                     <td className={`pt-2 text-right font-bold ${remaining === 0 ? 'text-green-600' : 'text-red-500'}`}>
                                         {remaining === 0 ? '✓ Fully paid' : formatCurrency(remaining)}
                                     </td>
+                                    <td />
                                 </tr>
                             </tfoot>
                         </table>
@@ -578,9 +622,14 @@ export default function OrthodonticsTab({ patient }) {
                                                 Next: {formatDate(adj.next_adjustment_date)}
                                             </span>
                                         )}
+                                        {adj.entry_type === 'payment' && (
+                                            <span className="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full font-semibold">
+                                                Payment
+                                            </span>
+                                        )}
                                         {parseFloat(adj.amount_paid) > 0 && (
                                             <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-semibold">
-                                                Paid {formatCurrency(adj.amount_paid)}
+                                                Paid {formatCurrency(adj.amount_paid)} / Balance {formatCurrency(adj.balance_after)}
                                             </span>
                                         )}
                                     </div>
@@ -593,6 +642,11 @@ export default function OrthodonticsTab({ patient }) {
                                     )}
                                 </div>
                                 <div className="flex items-center justify-end gap-1 shrink-0">
+                                    {parseFloat(adj.amount_paid) > 0 && (
+                                        <button className="btn-icon" title="Print receipt" onClick={() => printEntryReceipt(adj)}>
+                                            <Printer className="w-4 h-4" />
+                                        </button>
+                                    )}
                                     <button className="btn-icon" onClick={() => setAdjModal(adj)}>
                                         <Pencil className="w-4 h-4" />
                                     </button>

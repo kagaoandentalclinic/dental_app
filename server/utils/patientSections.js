@@ -1,5 +1,6 @@
 const schema = require('./patient-form-schema.json');
 const { getDentalIssueSql } = require('./dentalChart');
+const { lastVisitSql, visitCountSql } = require('./visitLedger');
 const { logAudit } = require('./auditLogs');
 
 const SECTION_FIELDS = schema.sections;
@@ -446,8 +447,8 @@ async function getPatientDetail(pool, patientId) {
             CASE WHEN mh.patient_id IS NOT NULL THEN mh.height ELSE p.height END AS height,
             CASE WHEN mh.patient_id IS NOT NULL THEN mh.weight ELSE p.weight END AS weight,
             (SELECT COUNT(*) FROM dental_chart dc WHERE dc.patient_id = p.id AND ${getDentalIssueSql('dc')}) AS dental_issues,
-            (SELECT COUNT(*) FROM visits v WHERE v.patient_id = p.id) AS total_visits,
-            (SELECT MAX(v.visit_date) FROM visits v WHERE v.patient_id = p.id) AS last_visit
+            ${visitCountSql('p')} AS total_visits,
+            ${lastVisitSql('p')} AS last_visit
          FROM patients p
          LEFT JOIN admins a ON p.created_by = a.id
          LEFT JOIN patient_contacts pc ON pc.patient_id = p.id

@@ -7,6 +7,7 @@ const { verifyToken } = require('../middleware/auth');
 const { requirePermission } = require('../middleware/permissions');
 const { PERMISSIONS, getRolePermissions } = require('../utils/permissions');
 const { isStrongPassword, PASSWORD_POLICY_MESSAGE } = require('../utils/passwordPolicy');
+const { BACKFILL_ORTHO_ENTRY_TYPE_SQL, BACKFILL_VISIT_PAYMENTS_SQL } = require('../utils/visitLedger');
 
 // All routes require authentication
 router.use(verifyToken);
@@ -21,6 +22,7 @@ const BACKUP_TABLES = [
     { name: 'medical_history', orderBy: 'patient_id ASC, id ASC' },
     { name: 'dental_chart', orderBy: 'patient_id ASC, tooth_number ASC, id ASC' },
     { name: 'visits', orderBy: 'visit_date ASC, id ASC' },
+    { name: 'visit_payments', orderBy: 'payment_date ASC, created_at ASC, id ASC', optional: true },
     { name: 'orthodontic_cases', orderBy: 'created_at ASC, id ASC' },
     { name: 'orthodontic_adjustments', orderBy: 'adjustment_date ASC, id ASC' },
     { name: 'patient_photos', orderBy: 'uploaded_at ASC, id ASC' },
@@ -30,6 +32,8 @@ const BACKUP_TABLES = [
 ];
 
 const BACKUP_TABLE_NAMES = BACKUP_TABLES.map(table => table.name);
+// Tables added after backups were first shipped; older backup files may not include them.
+const OPTIONAL_BACKUP_TABLE_NAMES = new Set(BACKUP_TABLES.filter(table => table.optional).map(table => table.name));
 const BACKUP_JSON_COLUMNS = {
     audit_logs: new Set(['before_data', 'after_data', 'metadata']),
 };
@@ -667,6 +671,9 @@ router.post('/backup/restore', requirePermission(PERMISSIONS.MANAGE_BACKUPS), as
     }
 
     for (const tableName of BACKUP_TABLE_NAMES) {
+        if (backup.tables[tableName] == null && OPTIONAL_BACKUP_TABLE_NAMES.has(tableName)) {
+            backup.tables[tableName] = [];
+        }
         if (!Array.isArray(backup.tables[tableName])) {
             return res.status(400).json({ error: `Backup data for table "${tableName}" is missing or invalid` });
         }
@@ -684,6 +691,14 @@ router.post('/backup/restore', requirePermission(PERMISSIONS.MANAGE_BACKUPS), as
         for (const tableName of BACKUP_TABLE_NAMES) {
             await insertRows(db, tableName, backup.tables[tableName]);
         }
+
+        // Backups made before the payment ledger / entry types existed need the same
+        // backfill the schema migration applies.
+        const adjustmentRows = backup.tables.orthodontic_adjustments;
+        if (adjustmentRows.length > 0 && !('entry_type' in adjustmentRows[0])) {
+            await db.query(BACKFILL_ORTHO_ENTRY_TYPE_SQL);
+        }
+        await db.query(BACKFILL_VISIT_PAYMENTS_SQL);
 
         await resetClinicSettingsSequence(db);
         await db.query('COMMIT');

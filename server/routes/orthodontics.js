@@ -3,6 +3,7 @@ const router = express.Router({ mergeParams: true });
 const pool = require('../db/pool');
 const { verifyToken } = require('../middleware/auth');
 const { normalizeClinicTimezoneOffset } = require('../utils/appointmentDate');
+const { fetchOrthoEntries } = require('../utils/visitLedger');
 
 function normalizeCurrencyAmount(value, fieldName) {
     if (value == null || value === '') return 0;
@@ -81,15 +82,8 @@ router.get('/', verifyToken, async (req, res) => {
         if (caseRes.rows.length === 0) return res.json({ case: null, adjustments: [] });
 
         const orthoCase = caseRes.rows[0];
-        const adjRes = await pool.query(
-            `SELECT oa.*, a.full_name AS performed_by_name
-             FROM orthodontic_adjustments oa
-             LEFT JOIN admins a ON oa.performed_by = a.id
-             WHERE oa.patient_id = $1
-             ORDER BY oa.adjustment_date DESC`,
-            [id]
-        );
-        res.json({ case: orthoCase, adjustments: adjRes.rows });
+        const adjustments = await fetchOrthoEntries(pool, id);
+        res.json({ case: orthoCase, adjustments });
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'Server error' });
@@ -221,7 +215,7 @@ async function recalcTotalPaid(client, caseId) {
 
 // POST /api/patients/:id/orthodontics/:caseId/adjustments
 router.post('/:caseId/adjustments', verifyToken, async (req, res) => {
-    const { adjustment_date, notes, next_adjustment_date, amount_paid, payment_notes } = req.body;
+    const { adjustment_date, notes, next_adjustment_date, amount_paid, payment_notes, entry_type } = req.body;
     const db = await pool.connect();
     try {
         await db.query('BEGIN');
@@ -245,8 +239,8 @@ router.post('/:caseId/adjustments', verifyToken, async (req, res) => {
         const result = await db.query(
             `INSERT INTO orthodontic_adjustments
                (case_id, patient_id, adjustment_date, notes, next_adjustment_date,
-                performed_by, amount_paid, payment_notes)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+                performed_by, amount_paid, payment_notes, entry_type)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
              RETURNING *`,
             [
                 req.params.caseId,
@@ -257,6 +251,7 @@ router.post('/:caseId/adjustments', verifyToken, async (req, res) => {
                 req.admin.id,
                 normalizedAmountPaid,
                 payment_notes || null,
+                entry_type === 'payment' ? 'payment' : 'adjustment',
             ]
         );
         await recalcTotalPaid(db, req.params.caseId);

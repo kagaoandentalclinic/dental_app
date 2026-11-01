@@ -303,6 +303,61 @@ CREATE TABLE IF NOT EXISTS orthodontic_adjustments (
 ALTER TABLE orthodontic_adjustments ADD COLUMN IF NOT EXISTS amount_paid DECIMAL(10,2) DEFAULT 0;
 ALTER TABLE orthodontic_adjustments ADD COLUMN IF NOT EXISTS payment_notes TEXT;
 
+-- Distinguish real adjustment visits from payment-only entries.
+-- Runs once: existing "Payment entry" rows (created by Record Payment) are tagged as payments.
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'orthodontic_adjustments' AND column_name = 'entry_type'
+    ) THEN
+        ALTER TABLE orthodontic_adjustments
+            ADD COLUMN entry_type VARCHAR(20) NOT NULL DEFAULT 'adjustment';
+        UPDATE orthodontic_adjustments SET entry_type = 'payment' WHERE notes = 'Payment entry';
+    END IF;
+END $$;
+DO $$
+BEGIN
+    ALTER TABLE orthodontic_adjustments ADD CONSTRAINT orthodontic_adjustments_entry_type_check
+      CHECK (entry_type IN ('adjustment', 'payment'));
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+CREATE INDEX IF NOT EXISTS idx_orthodontic_adjustments_patient ON orthodontic_adjustments(patient_id, adjustment_date);
+
+-- ============================================
+-- VISIT PAYMENTS (payment ledger per visit)
+-- visits.partial_amount_paid / payment_status are kept in sync with this ledger.
+-- ============================================
+CREATE TABLE IF NOT EXISTS visit_payments (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  visit_id UUID NOT NULL REFERENCES visits(id) ON DELETE CASCADE,
+  patient_id UUID NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+  amount DECIMAL(10,2) NOT NULL CHECK (amount > 0),
+  payment_date DATE NOT NULL DEFAULT CURRENT_DATE,
+  notes TEXT,
+  recorded_by UUID REFERENCES admins(id),
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_visit_payments_visit ON visit_payments(visit_id, payment_date);
+CREATE INDEX IF NOT EXISTS idx_visit_payments_patient ON visit_payments(patient_id);
+
+-- Seed one ledger row for visits paid before the ledger existed (idempotent;
+-- keep in sync with BACKFILL_VISIT_PAYMENTS_SQL in server/utils/visitLedger.js).
+INSERT INTO visit_payments (visit_id, patient_id, amount, payment_date, notes, recorded_by, created_at)
+SELECT v.id, v.patient_id,
+       CASE WHEN v.payment_status = 'partial' THEN v.partial_amount_paid ELSE v.cost END,
+       v.visit_date::date,
+       'Recorded before payment history',
+       v.dentist_id,
+       v.created_at
+FROM visits v
+WHERE v.patient_id IS NOT NULL
+  AND (
+    (v.payment_status = 'partial' AND COALESCE(v.partial_amount_paid, 0) > 0)
+    OR (v.payment_status = 'paid' AND COALESCE(v.cost, 0) > 0)
+  )
+  AND NOT EXISTS (SELECT 1 FROM visit_payments vp WHERE vp.visit_id = v.id);
+
 -- ============================================
 -- CLINIC SETTINGS
 -- ============================================

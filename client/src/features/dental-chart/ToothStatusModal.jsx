@@ -1,14 +1,20 @@
 import { useState } from 'react';
 import Modal from '../../components/Modal';
-import { TOOTH_STATUSES, TOOTH_NAMES } from '../../utils/constants';
+import { TOOTH_STATUSES, TOOTH_NAMES, RESTORATION_CLASSES, RESTORATION_CLASS_STATUSES } from '../../utils/constants';
 
 export default function ToothStatusModal({ tooth, notation = 'Universal', displayNumber, toothName, onSave, onClose }) {
     const { number, tooth: toothData, isExtra } = tooth;
     const [status, setStatus] = useState(toothData?.status || 'healthy');
     const [notes, setNotes] = useState(toothData?.notes || '');
+    const [restorationClass, setRestorationClass] = useState(toothData?.surface || '');
+    const showRestorationClass = RESTORATION_CLASS_STATUSES.includes(status);
 
     const handleSave = () => {
-        onSave(number, { status, notes: notes || null });
+        onSave(number, {
+            status,
+            notes: notes || null,
+            surface: showRestorationClass && restorationClass ? restorationClass : null,
+        });
     };
 
     const title = isExtra
@@ -58,6 +64,22 @@ export default function ToothStatusModal({ tooth, notation = 'Universal', displa
                         ))}
                     </div>
                 </div>
+                {showRestorationClass && (
+                    <div>
+                        <label className="form-label">Restoration Class</label>
+                        <select
+                            className="form-select"
+                            value={restorationClass}
+                            onChange={e => setRestorationClass(e.target.value)}
+                        >
+                            <option value="">Not specified</option>
+                            {RESTORATION_CLASSES.map(c => <option key={c} value={c}>{c}</option>)}
+                            {restorationClass && !RESTORATION_CLASSES.includes(restorationClass) && (
+                                <option value={restorationClass}>{restorationClass}</option>
+                            )}
+                        </select>
+                    </div>
+                )}
                 <div>
                     <label className="form-label">Notes</label>
                     <textarea

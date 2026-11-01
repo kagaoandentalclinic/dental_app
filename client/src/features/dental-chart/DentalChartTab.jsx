@@ -244,6 +244,11 @@ export default function DentalChartTab({ patient }) {
                         {statusConfig.label}
                     </span>
                 </p>
+                {tooth?.surface && (
+                    <p className="text-xs mt-1">
+                        Class: <span className="font-semibold">{tooth.surface}</span>
+                    </p>
+                )}
                 {tooth?.notes && (
                     <p className="text-xs mt-1 leading-relaxed">
                         {tooth.notes}
@@ -408,6 +413,9 @@ export default function DentalChartTab({ patient }) {
                                     >
                                         {currentCfg.label}
                                     </span>
+                                    {current.surface && (
+                                        <p className="text-[11px] text-text-secondary mt-1">{current.surface}</p>
+                                    )}
                                     {changes[et.tooth_number] && (
                                         <span className="absolute top-1.5 left-1.5 w-2 h-2 rounded-full bg-amber-400" />
                                     )}

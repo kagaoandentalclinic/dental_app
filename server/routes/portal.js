@@ -12,6 +12,7 @@ const { sendPortalPasswordResetEmail, sendPortalVerificationEmail } = require('.
 const { verifyGoogleIdToken } = require('../utils/googleAuth');
 const { buildClinicAppointmentDateTime } = require('../utils/appointmentDate');
 const { createLoginRateLimiter } = require('../middleware/loginRateLimit');
+const { lastVisitSql } = require('../utils/visitLedger');
 const { isStrongPassword, PASSWORD_POLICY_MESSAGE } = require('../utils/passwordPolicy');
 
 const portalLoginRateLimit = createLoginRateLimiter();
@@ -769,9 +770,9 @@ router.get('/dashboard', verifyPortalPatient, async (req, res) => {
                 [patientId]
             ),
             pool.query(
-                `SELECT MAX(visit_date) AS last_visit
-                 FROM visits
-                 WHERE patient_id = $1`,
+                `SELECT ${lastVisitSql('p')} AS last_visit
+                 FROM patients p
+                 WHERE p.id = $1`,
                 [patientId]
             ),
             pool.query(
